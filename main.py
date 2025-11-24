@@ -16,9 +16,10 @@ app = FastAPI(
 )
 
 # Configure CORS
+# TODO: In production, replace ["*"] with specific trusted domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # For development only
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,19 +36,9 @@ resume_counter = 0
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {
-        "message": "Welcome to Creerlio Resume Builder API",
-        "version": "1.0.0",
-        "endpoints": {
-            "docs": "/docs",
-            "create_resume": "POST /api/resumes",
-            "get_resume": "GET /api/resumes/{resume_id}",
-            "export_pdf": "GET /api/resumes/{resume_id}/export",
-            "enhance": "POST /api/enhance",
-            "suggest_skills": "POST /api/suggest-skills"
-        }
-    }
+    """Root endpoint - redirects to the resume builder interface."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/index.html")
 
 
 @app.post("/api/resumes")

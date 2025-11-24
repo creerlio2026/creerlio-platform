@@ -125,9 +125,10 @@ class PDFGenerator:
                 elements.append(Paragraph(exp_header, subheading_style))
                 
                 # Dates
-                end_date = "Present" if exp.current else exp.end_date
-                date_range = f"{exp.start_date} - {end_date}"
-                elements.append(Paragraph(date_range, normal_style))
+                end_date = "Present" if exp.current else (exp.end_date if exp.end_date else "")
+                if exp.start_date or end_date:
+                    date_range = f"{exp.start_date} - {end_date}" if exp.start_date else end_date
+                    elements.append(Paragraph(date_range, normal_style))
                 
                 # Description
                 elements.append(Paragraph(exp.description, normal_style))

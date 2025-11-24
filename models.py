@@ -30,7 +30,7 @@ class Education(BaseModel):
     institution: str
     degree: str
     field: str
-    start_date: str
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
     gpa: Optional[str] = None
 

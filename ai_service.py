@@ -1,9 +1,11 @@
 """AI service for resume enhancement using Azure OpenAI."""
 import os
+import logging
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -50,7 +52,7 @@ Enhanced version (provide only the improved text without explanations):"""
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"Error enhancing text: {e}")
+            logger.error(f"Error enhancing text: {e}")
             return text  # Return original if enhancement fails
     
     def suggest_skills(self, experiences: list, education: list) -> list:
@@ -99,5 +101,5 @@ Provide only a comma-separated list of skills, nothing else:"""
             skills = [skill.strip() for skill in skills_text.split(',')]
             return skills[:15]  # Limit to 15 skills
         except Exception as e:
-            print(f"Error suggesting skills: {e}")
+            logger.error(f"Error suggesting skills: {e}")
             return []
