@@ -3,22 +3,24 @@
  * Works in both local development and GitHub Codespaces
  */
 export function getApiBaseUrl(): string {
-  // Server-side: return localhost
-  if (typeof window === 'undefined') {
-    return 'http://localhost:5007';
+  // Client-side
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    if (hostname.includes('.app.github.dev')) {
+      // Codespaces: replace frontend port (3000 or 3001) with backend port
+      const apiHostname = hostname.replace('-3000.', '-5007.').replace('-3001.', '-5007.');
+      return `https://${apiHostname}`;
+    }
+    
+    // Local development
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:5007';
+    }
   }
   
-  // Client-side: detect Codespaces or local
-  const hostname = window.location.hostname;
-  
-  if (hostname.includes('.app.github.dev')) {
-    // Codespaces: replace frontend port (3000 or 3001) with backend port
-    const apiHostname = hostname.replace('-3000.', '-5007.').replace('-3001.', '-5007.');
-    return `https://${apiHostname}`;
-  }
-  
-  // Local development
-  return 'http://localhost:5007';
+  // Server-side or production - use Azure
+  return process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
 }
 
 /**

@@ -18,7 +18,7 @@ export default function LoginPage() {
     try {
       // Get API URL dynamically in browser
       const hostname = window.location.hostname;
-      let baseUrl = 'http://localhost:5007';
+      let baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
       
       // GitHub Codespaces URL pattern: <workspace>-<port>.app.github.dev
       if (hostname.includes('.app.github.dev')) {

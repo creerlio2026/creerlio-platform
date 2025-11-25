@@ -12,35 +12,35 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-amber-900">
+    <div className="min-h-screen bg-gradient-to-br from-yellow-400 via-yellow-500 to-amber-600">
       {/* Animated background pattern */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute top-20 left-10 w-72 h-72 bg-yellow-300/30 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-amber-400/30 rounded-full blur-3xl animate-pulse delay-1000"></div>
       </div>
 
       {/* Navigation */}
-      <nav className="relative bg-slate-900/80 backdrop-blur-lg border-b border-white/10">
+      <nav className="relative bg-yellow-600/80 backdrop-blur-lg border-b border-yellow-700/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-20">
             <div className="flex items-center">
               <div className="flex items-center space-x-3 group cursor-pointer">
-                <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-amber-600 rounded-full flex items-center justify-center shadow-lg group-hover:shadow-amber-500/50 transition-all duration-300">
-                  <span className="text-white font-bold text-xl">C</span>
+                <div className="w-11 h-11 bg-gradient-to-br from-yellow-300 to-yellow-400 rounded-full flex items-center justify-center shadow-lg group-hover:shadow-yellow-400/50 transition-all duration-300">
+                  <span className="text-yellow-900 font-bold text-xl">C</span>
                 </div>
-                <h1 className="text-2xl font-serif text-white tracking-tight">Creerlio</h1>
+                <h1 className="text-2xl font-serif text-yellow-900 tracking-tight">Creerlio</h1>
               </div>
             </div>
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => router.push('/auth/login')}
-                className="text-gray-300 hover:text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 hover:bg-white/5"
+                className="text-yellow-900 hover:text-yellow-950 px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 hover:bg-yellow-700/20"
               >
                 Sign in
               </button>
               <button
                 onClick={() => router.push('/auth/register')}
-                className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 shadow-lg hover:shadow-amber-500/50"
+                className="bg-yellow-300 hover:bg-yellow-200 text-yellow-900 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 shadow-lg hover:shadow-yellow-300/50"
               >
                 Get Started
               </button>
@@ -54,19 +54,19 @@ export default function Home() {
         <div className={`grid grid-cols-1 lg:grid-cols-2 gap-16 items-center transition-all duration-1000 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
           {/* Left Content */}
           <div className="max-w-2xl">
-            <div className="inline-block mb-4 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-full">
-              <span className="text-amber-400 text-sm font-medium">Professional recruitment excellence</span>
+            <div className="inline-block mb-4 px-4 py-2 bg-yellow-900/20 border border-yellow-900/30 rounded-full">
+              <span className="text-yellow-900 text-sm font-medium">Professional recruitment excellence</span>
             </div>
             
-            <h1 className="text-6xl lg:text-7xl font-bold text-white leading-tight mb-6">
+            <h1 className="text-6xl lg:text-7xl font-bold text-yellow-950 leading-tight mb-6">
               Recruitment,
               <br />
-              <span className="bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-yellow-600 via-yellow-700 to-amber-800 bg-clip-text text-transparent">
                 redefined.
               </span>
             </h1>
             
-            <p className="text-xl text-gray-300 mb-10 leading-relaxed">
+            <p className="text-xl text-yellow-900 mb-10 leading-relaxed">
               Premier recruitment platform with cutting-edge AI technology, 
               setting a new standard in hiring solutions for businesses and talent worldwide.
             </p>

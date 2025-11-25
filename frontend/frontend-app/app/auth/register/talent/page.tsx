@@ -69,8 +69,10 @@ export default function TalentRegistration() {
       formData.append('resume', file);
 
       const hostname = window.location.hostname;
-      let baseUrl = 'http://localhost:5007';
-      if (hostname.includes('.app.github.dev')) {
+      let baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        baseUrl = 'http://localhost:5007';
+      } else if (hostname.includes('.app.github.dev')) {
         const apiHostname = hostname.replace('-3000.', '-5007.');
         baseUrl = `https://${apiHostname}`;
       }
@@ -156,8 +158,10 @@ export default function TalentRegistration() {
     setLoading(true);
     try {
       const hostname = window.location.hostname;
-      let baseUrl = 'http://localhost:5007';
-      if (hostname.includes('.app.github.dev')) {
+      let baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        baseUrl = 'http://localhost:5007';
+      } else if (hostname.includes('.app.github.dev')) {
         const apiHostname = hostname.replace('-3000.', '-5007.');
         baseUrl = `https://${apiHostname}`;
       }

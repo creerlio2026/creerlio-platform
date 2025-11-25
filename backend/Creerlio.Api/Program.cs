@@ -48,7 +48,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
     });
 
-// Add CORS for GitHub Codespaces and local development
+// Add CORS for GitHub Codespaces, Azure, and local development
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -56,6 +56,12 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(origin => 
         {
             Console.WriteLine($"🔍 CORS: Checking origin: {origin}");
+            // Allow Azure App Services
+            if (origin.Contains("azurewebsites.net"))
+            {
+                Console.WriteLine($"✅ CORS: Allowing Azure origin: {origin}");
+                return true;
+            }
             // Allow GitHub Codespaces domains
             if (origin.Contains("app.github.dev") || origin.Contains("github.dev"))
             {

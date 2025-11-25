@@ -13,7 +13,7 @@ export default function ApiTestPage() {
   const testApi = async () => {
     try {
       const hostname = window.location.hostname;
-      let baseUrl = 'http://localhost:5007';
+      let baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
       
       if (hostname.includes('.app.github.dev')) {
         const apiHostname = hostname.replace('-3000.', '-5007.');

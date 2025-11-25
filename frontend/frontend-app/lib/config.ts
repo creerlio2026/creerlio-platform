@@ -21,8 +21,8 @@ export const getApiUrl = () => {
     }
   }
   
-  // Server-side or fallback
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5007';
+  // Server-side or fallback - use Azure production URL
+  return process.env.NEXT_PUBLIC_API_URL || 'https://creerlio-api.azurewebsites.net';
 };
 
 export const API_URL = getApiUrl();
