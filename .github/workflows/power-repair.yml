@@ -1,0 +1,151 @@
+name: Power Auto-Fix & Recovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # Run every 6 hours
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/**'
+
+jobs:
+  power-repair:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: frontend/frontend-app/package-lock.json
+    
+    - name: Run Power Auto-Fix Engine
+      run: |
+        chmod +x scripts/power-autofix.sh
+        bash scripts/power-autofix.sh
+      env:
+        NEXT_PUBLIC_API_URL: https://creerlio-api.azurewebsites.net
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+    
+    - name: Upload build artifacts
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts
+        path: |
+          backend/bin/Release/net8.0/
+          frontend/frontend-app/.next/
+    
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: error-logs
+        path: |
+          /tmp/backend-test.log
+          /tmp/frontend-test.log
+          /tmp/docker-build.log
+    
+    - name: Notify on failure
+      if: failure()
+      run: |
+        echo "🚨 Power Auto-Fix detected critical issues!"
+        echo "Check the uploaded error-logs artifact for details."
+        exit 1
+
+  azure-health-check:
+    runs-on: ubuntu-latest
+    needs: power-repair
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Check Azure Backend Health
+      run: |
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://creerlio-api.azurewebsites.net")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "❌ Backend health check failed: HTTP $HTTP_CODE"
+          exit 1
+        else
+          echo "✅ Backend is healthy (HTTP 200)"
+        fi
+    
+    - name: Check Azure Frontend Health
+      run: |
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://creerlio-app.azurewebsites.net")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️ Frontend health check: HTTP $HTTP_CODE"
+          echo "Frontend may need redeployment"
+        else
+          echo "✅ Frontend is healthy (HTTP 200)"
+        fi
+    
+    - name: Run Azure Quick Check
+      run: |
+        chmod +x scripts/azure-quick-check.sh
+        bash scripts/azure-quick-check.sh
+
+  auto-deploy-if-needed:
+    runs-on: ubuntu-latest
+    needs: azure-health-check
+    if: failure()
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+    
+    - name: Rebuild and Deploy Backend
+      run: |
+        cd backend
+        dotnet restore
+        dotnet build --configuration Release
+        dotnet publish Creerlio.Api/Creerlio.Api.csproj -c Release -o publish
+    
+    - name: Deploy Backend to Azure
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: creerlio-api
+        package: backend/publish
+    
+    - name: Rebuild and Deploy Frontend
+      run: |
+        cd frontend/frontend-app
+        npm ci
+        npm run build
+      env:
+        NEXT_PUBLIC_API_URL: https://creerlio-api.azurewebsites.net
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
+    
+    - name: Deploy Frontend to Azure
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: creerlio-app
+        package: frontend/frontend-app/.next/standalone
