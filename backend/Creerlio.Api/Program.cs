@@ -40,6 +40,11 @@ builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddHttpClient<Creerlio.Application.Interfaces.IFredAIService, Creerlio.Application.Services.FredAIService>();
 builder.Services.AddScoped<Creerlio.Application.Interfaces.IFredAIService, Creerlio.Application.Services.FredAIService>();
 builder.Services.AddScoped<Creerlio.Application.Services.MasterDataSeedService>();
+
+// AI Resume Parsing Service (Master Plan Phase 2)
+builder.Services.AddHttpClient<Creerlio.Application.Services.IResumeParsingService, Creerlio.Infrastructure.Services.ResumeParsingService>();
+builder.Services.AddScoped<Creerlio.Application.Services.IResumeParsingService, Creerlio.Infrastructure.Services.ResumeParsingService>();
+
 builder.Services.AddMemoryCache(); // For Master Data API caching
 
 // Add controllers with JSON options

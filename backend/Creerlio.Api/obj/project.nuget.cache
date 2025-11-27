@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "3weoqW//gU4=",
+  "dgSpecHash": "CuhdlDy5DiM=",
   "success": true,
   "projectFilePath": "/workspaces/creerlio-platform/backend/Creerlio.Api/Creerlio.Api.csproj",
   "expectedPackageFiles": [
@@ -95,6 +95,7 @@
     "/home/codespace/.nuget/packages/mono.texttemplating/2.2.1/mono.texttemplating.2.2.1.nupkg.sha512",
     "/home/codespace/.nuget/packages/newtonsoft.json/11.0.2/newtonsoft.json.11.0.2.nupkg.sha512",
     "/home/codespace/.nuget/packages/openai/2.7.0/openai.2.7.0.nupkg.sha512",
+    "/home/codespace/.nuget/packages/pdfpig/0.1.9/pdfpig.0.1.9.nupkg.sha512",
     "/home/codespace/.nuget/packages/sqlitepclraw.bundle_e_sqlite3/2.1.6/sqlitepclraw.bundle_e_sqlite3.2.1.6.nupkg.sha512",
     "/home/codespace/.nuget/packages/sqlitepclraw.core/2.1.6/sqlitepclraw.core.2.1.6.nupkg.sha512",
     "/home/codespace/.nuget/packages/sqlitepclraw.lib.e_sqlite3/2.1.6/sqlitepclraw.lib.e_sqlite3.2.1.6.nupkg.sha512",

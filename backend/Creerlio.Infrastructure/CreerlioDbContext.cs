@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Creerlio.Domain.Entities;
 using Creerlio.Domain.Entities.MasterData;
 using System.Text.Json;
+using DomainApplication = Creerlio.Domain.Entities.Application;
 
 namespace Creerlio.Infrastructure;
 
@@ -66,7 +67,7 @@ public class CreerlioDbContext : DbContext
     
     // Job Posting & ATS
     public DbSet<JobPosting> JobPostings => Set<JobPosting>();
-    public DbSet<Application> Applications => Set<Application>();
+    public DbSet<DomainApplication> Applications => Set<DomainApplication>();
     public DbSet<ApplicationNote> ApplicationNotes => Set<ApplicationNote>();
     public DbSet<ApplicationActivity> ApplicationActivities => Set<ApplicationActivity>();
     public DbSet<Interview> Interviews => Set<Interview>();
@@ -191,8 +192,8 @@ public class CreerlioDbContext : DbContext
         modelBuilder.Entity<JobMatch>().HasIndex(e => new { e.TalentProfileId, e.JobPostingId }).IsUnique();
         modelBuilder.Entity<JobMatch>().HasIndex(e => new { e.TalentProfileId, e.MatchScore });
         modelBuilder.Entity<ElectronicFootprint>().HasIndex(e => e.TalentProfileId).IsUnique();
-        modelBuilder.Entity<Application>().HasIndex(e => new { e.JobPostingId, e.Status });
-        modelBuilder.Entity<Application>().HasIndex(e => e.TalentProfileId);
+        modelBuilder.Entity<DomainApplication>().HasIndex(e => new { e.JobPostingId, e.Status });
+        modelBuilder.Entity<DomainApplication>().HasIndex(e => e.TalentProfileId);
         modelBuilder.Entity<JobPosting>().HasIndex(e => new { e.BusinessProfileId, e.Status });
         modelBuilder.Entity<CareerPathway>().HasIndex(e => e.TalentProfileId);
         modelBuilder.Entity<SavedSearch>().HasIndex(e => e.TalentProfileId);

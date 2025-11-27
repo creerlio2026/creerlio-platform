@@ -1,0 +1,39 @@
+{
+  "Version": 1,
+  "Hash": "4JjF/ILqXC/JCqwUF2DIKGSD8jxDAwco7Nvng+ITssw=",
+  "Source": "Creerlio.Api",
+  "BasePath": "_content/Creerlio.Api",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [
+    {
+      "Name": "Creerlio.Api/wwwroot",
+      "Source": "Creerlio.Api",
+      "ContentRoot": "/workspaces/creerlio-platform/backend/Creerlio.Api/wwwroot/",
+      "BasePath": "_content/Creerlio.Api",
+      "Pattern": "**"
+    }
+  ],
+  "Assets": [
+    {
+      "Identity": "/workspaces/creerlio-platform/backend/Creerlio.Api/wwwroot/favicon.svg",
+      "SourceId": "Creerlio.Api",
+      "SourceType": "Discovered",
+      "ContentRoot": "/workspaces/creerlio-platform/backend/Creerlio.Api/wwwroot/",
+      "BasePath": "_content/Creerlio.Api",
+      "RelativePath": "favicon.svg",
+      "AssetKind": "All",
+      "AssetMode": "All",
+      "AssetRole": "Primary",
+      "AssetMergeBehavior": "PreferTarget",
+      "AssetMergeSource": "",
+      "RelatedAsset": "",
+      "AssetTraitName": "",
+      "AssetTraitValue": "",
+      "CopyToOutputDirectory": "Never",
+      "CopyToPublishDirectory": "PreserveNewest",
+      "OriginalItemSpec": "wwwroot/favicon.svg"
+    }
+  ]
+}

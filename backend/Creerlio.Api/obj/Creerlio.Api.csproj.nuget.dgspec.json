@@ -102,6 +102,10 @@
               "target": "Package",
               "version": "[2.7.0, )"
             },
+            "PdfPig": {
+              "target": "Package",
+              "version": "[0.1.9, )"
+            },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
               "version": "[6.6.2, )"
@@ -158,9 +162,6 @@
             "projectReferences": {
               "/workspaces/creerlio-platform/backend/Creerlio.Domain/Creerlio.Domain.csproj": {
                 "projectPath": "/workspaces/creerlio-platform/backend/Creerlio.Domain/Creerlio.Domain.csproj"
-              },
-              "/workspaces/creerlio-platform/backend/Creerlio.Infrastructure/Creerlio.Infrastructure.csproj": {
-                "projectPath": "/workspaces/creerlio-platform/backend/Creerlio.Infrastructure/Creerlio.Infrastructure.csproj"
               }
             }
           }
@@ -311,6 +312,9 @@
           "net8.0": {
             "targetAlias": "net8.0",
             "projectReferences": {
+              "/workspaces/creerlio-platform/backend/Creerlio.Application/Creerlio.Application.csproj": {
+                "projectPath": "/workspaces/creerlio-platform/backend/Creerlio.Application/Creerlio.Application.csproj"
+              },
               "/workspaces/creerlio-platform/backend/Creerlio.Domain/Creerlio.Domain.csproj": {
                 "projectPath": "/workspaces/creerlio-platform/backend/Creerlio.Domain/Creerlio.Domain.csproj"
               }

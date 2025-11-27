@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Creerlio.Domain\Creerlio.Domain.csproj" />
+    <ProjectReference Include="..\Creerlio.Application\Creerlio.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

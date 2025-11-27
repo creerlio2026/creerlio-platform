@@ -1,0 +1,16 @@
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.dll
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/refint/Creerlio.Application.dll
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.csproj.AssemblyReference.cache
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.GeneratedMSBuildEditorConfig.editorconfig
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.AssemblyInfoInputs.cache
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.AssemblyInfo.cs
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.csproj.CoreCompileInputs.cache
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.sourcelink.json
+/workspaces/creerlio-platform/backend/Creerlio.Application/bin/Debug/net8.0/Creerlio.Application.deps.json
+/workspaces/creerlio-platform/backend/Creerlio.Application/bin/Debug/net8.0/Creerlio.Application.dll
+/workspaces/creerlio-platform/backend/Creerlio.Application/bin/Debug/net8.0/Creerlio.Application.pdb
+/workspaces/creerlio-platform/backend/Creerlio.Application/bin/Debug/net8.0/Creerlio.Domain.dll
+/workspaces/creerlio-platform/backend/Creerlio.Application/bin/Debug/net8.0/Creerlio.Domain.pdb
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.FFA7988D.Up2Date
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/Creerlio.Application.pdb
+/workspaces/creerlio-platform/backend/Creerlio.Application/obj/Debug/net8.0/ref/Creerlio.Application.dll
