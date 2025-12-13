@@ -100,22 +100,30 @@ export default function TalentEditProfilePage() {
 
   // Load persisted files on mount
   useEffect(() => {
-    const savedPortfolio = getUploadedFiles(userId, 'portfolio');
-    setPortfolioImages(savedPortfolio);
+    const loadFiles = async () => {
+      try {
+        const savedPortfolio = await getUploadedFiles(userId, 'portfolio');
+        setPortfolioImages(savedPortfolio);
+        
+        const savedVideos = await getUploadedFiles(userId, 'video');
+        setPortfolioVideos(savedVideos);
+        
+        const savedResume = await getUploadedFiles(userId, 'resume');
+        if (savedResume.length > 0) {
+          setResumeFile(savedResume[0]);
+        }
+        
+        // Load profile photo from localStorage
+        const savedPhoto = localStorage.getItem(`profilePhoto_${userId}`);
+        if (savedPhoto) {
+          setProfilePhoto(savedPhoto);
+        }
+      } catch (error) {
+        console.error('Error loading files:', error);
+      }
+    };
     
-    const savedVideos = getUploadedFiles(userId, 'video');
-    setPortfolioVideos(savedVideos);
-    
-    const savedResume = getUploadedFiles(userId, 'resume');
-    if (savedResume.length > 0) {
-      setResumeFile(savedResume[0]);
-    }
-    
-    // Load profile photo from localStorage
-    const savedPhoto = localStorage.getItem(`profilePhoto_${userId}`);
-    if (savedPhoto) {
-      setProfilePhoto(savedPhoto);
-    }
+    loadFiles();
   }, [userId]);
 
   const handleProfilePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,15 +159,24 @@ export default function TalentEditProfilePage() {
       }
 
       const uploadedFile = await fileToUploadedFile(file, 'portfolio');
-      newImages.push(uploadedFile);
-      saveUploadedFile(userId, 'portfolio', uploadedFile);
+      const result = await saveUploadedFile(userId, 'portfolio', uploadedFile);
+      
+      if (result.success) {
+        newImages.push(uploadedFile);
+        if (result.error) {
+          // Warning message if storage was cleared
+          alert(result.error);
+        }
+      } else {
+        alert(`Failed to save ${file.name}: ${result.error || 'Unknown error'}`);
+      }
     }
 
     setPortfolioImages([...portfolioImages, ...newImages]);
   };
 
-  const removePortfolioImage = (fileId: string) => {
-    removeUploadedFile(userId, 'portfolio', fileId);
+  const removePortfolioImage = async (fileId: string) => {
+    await removeUploadedFile(userId, 'portfolio', fileId);
     setPortfolioImages(portfolioImages.filter(img => img.id !== fileId));
   };
 
@@ -172,21 +189,49 @@ export default function TalentEditProfilePage() {
     for (const file of files) {
       const validation = validateFile(file, ['video/*'], 100); // 100MB limit for videos
       if (!validation.valid) {
-        alert(`${file.name}: ${validation.error}`);
+        alert(`❌ ${file.name}: ${validation.error}`);
         continue;
       }
 
-      const uploadedFile = await fileToUploadedFile(file, 'video');
-      newVideos.push(uploadedFile);
-      saveUploadedFile(userId, 'video', uploadedFile);
+      try {
+        // Show processing message for large files
+        if (file.size > 10 * 1024 * 1024) {
+          console.log(`Processing large video file: ${file.name} (${formatFileSize(file.size)})`);
+        }
+
+        // Convert file for preview
+        const uploadedFile = await fileToUploadedFile(file, 'video');
+        
+        // Save to IndexedDB (passing original file)
+        const result = await saveUploadedFile(userId, 'video', uploadedFile, file);
+        
+        if (result.success) {
+          newVideos.push(uploadedFile);
+          console.log(`✅ Video uploaded successfully: ${file.name}`);
+        } else {
+          // Show user-friendly error message
+          alert(`❌ Failed to upload ${file.name}\n\n${result.error || 'Unknown error'}\n\nTip: Try closing other tabs or removing old videos to free up space.`);
+        }
+      } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
+        alert(`❌ Failed to upload ${file.name}\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try again or use a smaller file.`);
+      }
     }
 
-    setPortfolioVideos([...portfolioVideos, ...newVideos]);
+    if (newVideos.length > 0) {
+      setPortfolioVideos([...portfolioVideos, ...newVideos]);
+      alert(`✅ Successfully uploaded ${newVideos.length} video(s) using IndexedDB storage!`);
+    }
   };
 
-  const removePortfolioVideo = (fileId: string) => {
-    removeUploadedFile(userId, 'video', fileId);
-    setPortfolioVideos(portfolioVideos.filter(vid => vid.id !== fileId));
+  const removePortfolioVideo = async (fileId: string) => {
+    try {
+      await removeUploadedFile(userId, 'video', fileId);
+      setPortfolioVideos(portfolioVideos.filter(vid => vid.id !== fileId));
+    } catch (error) {
+      console.error('Error removing video:', error);
+      alert('Failed to remove video. Please try again.');
+    }
   };
 
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -200,11 +245,15 @@ export default function TalentEditProfilePage() {
     }
 
     const uploadedFile = await fileToUploadedFile(file, 'resume');
-    saveUploadedFile(userId, 'resume', uploadedFile);
-    setResumeFile(uploadedFile);
+    const result = await saveUploadedFile(userId, 'resume', uploadedFile);
     
-    // Trigger AI parsing (future enhancement)
-    alert('Resume uploaded! AI parsing will pre-fill your profile in production.');
+    if (result.success) {
+      setResumeFile(uploadedFile);
+      // Trigger AI parsing (future enhancement)
+      alert('Resume uploaded! AI parsing will pre-fill your profile in production.');
+    } else {
+      alert(`Failed to upload resume: ${result.error || 'Unknown error'}`);
+    }
   };
 
   const addWorkExperience = () => {

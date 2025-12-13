@@ -1,4 +1,13 @@
 // File upload utilities with persistent storage
+import {
+  saveVideoToIndexedDB,
+  getVideosFromIndexedDB,
+  deleteVideoFromIndexedDB,
+  cleanupOldVideos,
+  videoFileToDataURL,
+  isIndexedDBSupported,
+  type VideoFile
+} from './indexedDBUtils';
 
 export interface UploadedFile {
   id: string;
@@ -13,41 +22,119 @@ export interface UploadedFile {
 const STORAGE_KEY_PREFIX = 'creerlio_uploads_';
 
 /**
- * Save uploaded file to localStorage
- * Note: localStorage has ~5-10MB limit. For production, use cloud storage.
+ * Save uploaded file to appropriate storage (IndexedDB for videos, localStorage for others)
+ * Note: localStorage has ~5-10MB limit. Videos use IndexedDB for larger capacity.
  */
-export function saveUploadedFile(userId: string, category: string, file: UploadedFile): void {
+export async function saveUploadedFile(
+  userId: string, 
+  category: string, 
+  file: UploadedFile,
+  originalFile?: File
+): Promise<{ success: boolean; error?: string }> {
   try {
+    // Use IndexedDB for video files to avoid localStorage quota issues
+    if (category === 'video') {
+      if (!isIndexedDBSupported()) {
+        const errorMsg = 'Your browser does not support video storage. Please use a modern browser like Chrome, Firefox, or Edge.';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      if (!originalFile) {
+        const errorMsg = 'Original video file is required for IndexedDB storage';
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+
+      // Try to save to IndexedDB
+      try {
+        await saveVideoToIndexedDB(userId, originalFile);
+        return { success: true };
+      } catch (dbError) {
+        const errorMsg = 'Failed to save video. Your browser storage may be full. Try removing old videos.';
+        console.error('IndexedDB save error:', dbError);
+        return { success: false, error: errorMsg };
+      }
+    }
+
+    // Use localStorage for other file types
     const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
     const existing = getUploadedFiles(userId, category);
     const updated = [...existing, file];
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-  } catch (error) {
-    console.error('Error saving file to localStorage:', error);
-    // If quota exceeded, try to clear old files
-    if (error instanceof Error && error.name === 'QuotaExceededError') {
-      clearOldFiles(userId);
-      // Retry save
-      try {
-        const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
-        localStorage.setItem(storageKey, JSON.stringify([file]));
-      } catch (retryError) {
-        console.error('Failed to save file even after cleanup:', retryError);
+    
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      return { success: true };
+    } catch (storageError) {
+      // Handle quota exceeded error
+      if (storageError instanceof Error && storageError.name === 'QuotaExceededError') {
+        console.warn('localStorage quota exceeded, attempting cleanup...');
+        
+        // Try to clear old files
+        clearOldFiles(userId);
+        
+        // Retry save with just the new file
+        try {
+          localStorage.setItem(storageKey, JSON.stringify([file]));
+          return { 
+            success: true, 
+            error: 'Storage was full. Old files were removed to make space for this upload.' 
+          };
+        } catch (retryError) {
+          const errorMsg = `Storage quota exceeded. File size: ${formatFileSize(file.size)}. Try uploading a smaller file or clearing old uploads.`;
+          console.error('Failed to save file even after cleanup:', retryError);
+          return { success: false, error: errorMsg };
+        }
       }
+      throw storageError;
     }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Failed to save file';
+    console.error('Error saving file:', error);
+    return { success: false, error: errorMsg };
   }
 }
 
 /**
  * Get all uploaded files for a user and category
+ * Videos are retrieved from IndexedDB, other files from localStorage
  */
-export function getUploadedFiles(userId: string, category: string): UploadedFile[] {
+export async function getUploadedFiles(userId: string, category: string): Promise<UploadedFile[]> {
   try {
+    // Get videos from IndexedDB
+    if (category === 'video') {
+      if (!isIndexedDBSupported()) {
+        console.warn('IndexedDB not supported');
+        return [];
+      }
+
+      const videoFiles = await getVideosFromIndexedDB(userId);
+      
+      // Convert VideoFile format to UploadedFile format
+      const uploadedFiles: UploadedFile[] = await Promise.all(
+        videoFiles.map(async (video) => {
+          const dataUrl = await videoFileToDataURL(video);
+          return {
+            id: video.id,
+            name: video.name,
+            type: video.type,
+            size: video.size,
+            dataUrl,
+            uploadedAt: video.uploadedAt,
+            category: 'video' as const
+          };
+        })
+      );
+      
+      return uploadedFiles;
+    }
+
+    // Get other files from localStorage
     const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
     const data = localStorage.getItem(storageKey);
     return data ? JSON.parse(data) : [];
   } catch (error) {
-    console.error('Error reading files from localStorage:', error);
+    console.error('Error reading files:', error);
     return [];
   }
 }
@@ -62,43 +149,73 @@ export function getUploadedFile(userId: string, category: string, fileId: string
 
 /**
  * Remove a file by ID
+ * Videos are removed from IndexedDB, other files from localStorage
  */
-export function removeUploadedFile(userId: string, category: string, fileId: string): void {
+export async function removeUploadedFile(userId: string, category: string, fileId: string): Promise<void> {
   try {
+    // Remove video from IndexedDB
+    if (category === 'video') {
+      if (isIndexedDBSupported()) {
+        await deleteVideoFromIndexedDB(fileId);
+      }
+      return;
+    }
+
+    // Remove other files from localStorage
     const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
-    const existing = getUploadedFiles(userId, category);
+    const existing = await getUploadedFiles(userId, category);
     const updated = existing.filter(f => f.id !== fileId);
     localStorage.setItem(storageKey, JSON.stringify(updated));
   } catch (error) {
-    console.error('Error removing file from localStorage:', error);
+    console.error('Error removing file:', error);
   }
 }
 
 /**
  * Clear all files for a category
+ * Videos are cleared from IndexedDB, other files from localStorage
  */
-export function clearUploadedFiles(userId: string, category: string): void {
+export async function clearUploadedFiles(userId: string, category: string): Promise<void> {
   try {
+    if (category === 'video' && isIndexedDBSupported()) {
+      const videos = await getVideosFromIndexedDB(userId);
+      for (const video of videos) {
+        await deleteVideoFromIndexedDB(video.id);
+      }
+      return;
+    }
+
     const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
     localStorage.removeItem(storageKey);
   } catch (error) {
-    console.error('Error clearing files from localStorage:', error);
+    console.error('Error clearing files:', error);
   }
 }
 
 /**
  * Clear old files (older than 30 days) to free up space
+ * Also clears old videos from IndexedDB
  */
-function clearOldFiles(userId: string): void {
+async function clearOldFiles(userId: string): Promise<void> {
   const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
   const categories = ['profile', 'portfolio', 'resume', 'certificate', 'logo', 'cover'];
   
-  categories.forEach(category => {
-    const files = getUploadedFiles(userId, category);
+  // Clear old files from localStorage
+  categories.forEach(async (category) => {
+    const files = await getUploadedFiles(userId, category);
     const recentFiles = files.filter(f => f.uploadedAt > thirtyDaysAgo);
     const storageKey = `${STORAGE_KEY_PREFIX}${userId}_${category}`;
     localStorage.setItem(storageKey, JSON.stringify(recentFiles));
   });
+
+  // Clear old videos from IndexedDB
+  if (isIndexedDBSupported()) {
+    try {
+      await cleanupOldVideos(userId, 30);
+    } catch (error) {
+      console.error('Error cleaning up old videos:', error);
+    }
+  }
 }
 
 /**
@@ -212,24 +329,37 @@ export function validateFile(
 
 /**
  * Get total storage used by user (in bytes)
+ * Includes both localStorage and IndexedDB storage
  */
-export function getTotalStorageUsed(userId: string): number {
+export async function getTotalStorageUsed(userId: string): Promise<number> {
   const categories = ['profile', 'portfolio', 'resume', 'certificate', 'logo', 'cover'];
   let total = 0;
   
-  categories.forEach(category => {
-    const files = getUploadedFiles(userId, category);
+  // Calculate localStorage usage
+  for (const category of categories) {
+    const files = await getUploadedFiles(userId, category);
     total += files.reduce((sum, file) => sum + file.size, 0);
-  });
+  }
+  
+  // Add IndexedDB video storage
+  if (isIndexedDBSupported()) {
+    try {
+      const videos = await getVideosFromIndexedDB(userId);
+      total += videos.reduce((sum, video) => sum + video.size, 0);
+    } catch (error) {
+      console.error('Error calculating video storage:', error);
+    }
+  }
   
   return total;
 }
 
 /**
  * Check if storage quota is available
+ * Note: IndexedDB has much larger limits than localStorage
  */
-export function hasStorageQuota(userId: string, additionalBytes: number): boolean {
+export async function hasStorageQuota(userId: string, additionalBytes: number): Promise<boolean> {
   const MAX_STORAGE = 10 * 1024 * 1024; // 10MB limit for localStorage
-  const used = getTotalStorageUsed(userId);
+  const used = await getTotalStorageUsed(userId);
   return (used + additionalBytes) < MAX_STORAGE;
 }
