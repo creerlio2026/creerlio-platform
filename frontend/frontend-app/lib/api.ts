@@ -24,21 +24,60 @@ export function getApiBaseUrl(): string {
 }
 
 /**
- * Safe fetch wrapper that handles JSON parsing errors
+ * Safe fetch wrapper that handles JSON parsing errors and authentication
  */
 export async function safeFetch<T = any>(
   url: string,
   options?: RequestInit
-): Promise<{ data: T | null; error: string | null }> {
+): Promise<{ data: T | null; error: string | null; status?: number }> {
   try {
     const response = await fetch(url, options);
     
     if (!response.ok) {
       const text = await response.text();
       console.error(`API Error (${response.status}):`, text.substring(0, 200));
+      
+      // Handle authentication errors specifically
+      if (response.status === 401) {
+        const errorMsg = '🔒 Authentication required. Your session may have expired. Please log in again.';
+        
+        // Show user-friendly error
+        if (typeof window !== 'undefined') {
+          alert(errorMsg);
+          
+          // Optionally redirect to login
+          const shouldRedirect = confirm('Would you like to go to the login page now?');
+          if (shouldRedirect) {
+            window.location.href = '/auth/login';
+          }
+        }
+        
+        return {
+          data: null,
+          error: errorMsg,
+          status: 401
+        };
+      }
+      
+      // Handle other HTTP errors
+      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      
+      // Try to parse error message from response
+      try {
+        const errorData = JSON.parse(text);
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+      } catch {
+        // Use default error message
+      }
+      
       return {
         data: null,
-        error: `HTTP ${response.status}: ${response.statusText}`
+        error: errorMessage,
+        status: response.status
       };
     }
     
@@ -56,9 +95,21 @@ export async function safeFetch<T = any>(
     }
   } catch (error) {
     console.error('Fetch Error:', error);
+    
+    // Provide more helpful network error messages
+    let errorMessage = 'Network error occurred';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Failed to fetch')) {
+        errorMessage = '🌐 Unable to connect to the server. Please check your internet connection and try again.';
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
     return {
       data: null,
-      error: error instanceof Error ? error.message : 'Network error'
+      error: errorMessage
     };
   }
 }
