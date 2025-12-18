@@ -361,75 +361,94 @@ export default function SearchPage() {
             </p>
           </div>
 
-          {/* Search Interface */}
-          <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-12">
-            <form onSubmit={handleSearch} className="max-w-2xl mx-auto space-y-6">
-              <div className="space-y-4">
-                {/* Search Type */}
-                <div className="flex gap-2">
+          {/* Search Interface with Map */}
+          <div className="grid lg:grid-cols-2 gap-6">
+            {/* Search Form - Left Side */}
+            <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-12">
+              <form onSubmit={handleSearch} className="space-y-6">
+                <div className="space-y-4">
+                  {/* Search Type */}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSearchType('jobs')}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        searchType === 'jobs'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      Jobs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchType('talent')}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        searchType === 'talent'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      Talent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchType('business')}
+                      className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                        searchType === 'business'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      }`}
+                    >
+                      Business
+                    </button>
+                  </div>
+
+                  {/* Search Input */}
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={`Search for ${searchType}...`}
+                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+
+                  {/* Location Filter */}
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="Location (optional)"
+                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+
+                  {/* Search Button */}
                   <button
-                    type="button"
-                    onClick={() => setSearchType('jobs')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      searchType === 'jobs'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
+                    type="submit"
+                    disabled={isSearching}
+                    className="w-full px-6 py-4 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Jobs
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSearchType('talent')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      searchType === 'talent'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    Talent
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSearchType('business')}
-                    className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-                      searchType === 'business'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    Business
+                    {isSearching ? 'Searching...' : 'Search'}
                   </button>
                 </div>
+              </form>
+            </div>
 
-                {/* Search Input */}
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={`Search for ${searchType}...`}
-                  className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-                />
-
-                {/* Location Filter */}
-                <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Location (optional)"
-                  className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-                />
-
-                {/* Search Button */}
-                <button
-                  type="submit"
-                  disabled={isSearching}
-                  className="w-full px-6 py-4 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSearching ? 'Searching...' : 'Search'}
-                </button>
+            {/* Map - Right Side */}
+            <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6">
+              <div className="h-[600px] w-full">
+                {isGeocoding ? (
+                  <div className="h-full flex items-center justify-center bg-slate-800/50 rounded-lg">
+                    <div className="text-center">
+                      <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-slate-300">Geocoding locations...</p>
+                    </div>
+                  </div>
+                ) : (
+                  <SearchMap markers={mapMarkers} />
+                )}
               </div>
-            </form>
+            </div>
           </div>
 
           {/* Error Message */}
@@ -442,25 +461,6 @@ export default function SearchPage() {
           {/* Search Results */}
           {Object.keys(searchResults).length > 0 && (
             <div className="space-y-6">
-              {/* Map Display for Talent and Business Results */}
-              {(searchResults.talent || searchResults.businesses) && mapMarkers.length > 0 && (
-                <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6">
-                  <h2 className="text-2xl font-bold mb-4">Map View</h2>
-                  <div className="h-[500px] w-full rounded-lg overflow-hidden">
-                    {isGeocoding ? (
-                      <div className="h-full flex items-center justify-center bg-slate-800/50">
-                        <div className="text-center">
-                          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                          <p className="text-slate-300">Geocoding locations...</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <SearchMap markers={mapMarkers} />
-                    )}
-                  </div>
-                </div>
-              )}
-
               {searchResults.jobs && searchResults.jobs.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Jobs ({searchResults.jobs.length})</h2>
