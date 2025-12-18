@@ -32,6 +32,15 @@ interface Job {
   created_at: string
 }
 
+interface Applicant {
+  id: number
+  talent_name: string | null
+  talent_email: string | null
+  talent_title: string | null
+  status: string
+  created_at: string
+}
+
 export default function BusinessDashboard() {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
@@ -66,6 +75,11 @@ export default function BusinessDashboard() {
       fetchBusinessProfile(email)
       // Fetch jobs
       fetchJobs(response.data.id)
+      
+      // If a job is selected, fetch applicants
+      if (selectedJobId) {
+        fetchJobApplicants(selectedJobId, email)
+      }
     } catch (error) {
       console.error('Error fetching user:', error)
       localStorage.removeItem('access_token')
@@ -111,6 +125,32 @@ export default function BusinessDashboard() {
       console.error('Error fetching jobs:', error)
       // Set empty array on error
       setJobs([])
+    }
+  }
+
+  const fetchJobApplicants = async (jobId: number, email: string) => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await axios.get(`${apiUrl}/api/applications/job/${jobId}`, {
+        params: { email },
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
+      if (response.data && Array.isArray(response.data.applications)) {
+        setApplicants(response.data.applications)
+      }
+    } catch (error) {
+      console.error('Error fetching applicants:', error)
+      setApplicants([])
+    }
+  }
+
+  const handleJobClick = (jobId: number) => {
+    const email = localStorage.getItem('user_email')
+    if (email) {
+      setSelectedJobId(jobId)
+      fetchJobApplicants(jobId, email)
     }
   }
 
@@ -180,37 +220,85 @@ export default function BusinessDashboard() {
           </div>
 
           {jobs.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-800">
-                    <th className="text-left py-3 px-4 text-gray-400 font-semibold">Title</th>
-                    <th className="text-left py-3 px-4 text-gray-400 font-semibold">Status</th>
-                    <th className="text-left py-3 px-4 text-gray-400 font-semibold">Location</th>
-                    <th className="text-left py-3 px-4 text-gray-400 font-semibold">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((job) => (
-                    <tr key={job.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                      <td className="py-3 px-4 text-white">{job.title}</td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-1 rounded text-xs ${
-                          job.status === 'published' ? 'bg-green-500/20 text-green-400' :
-                          job.status === 'draft' ? 'bg-yellow-500/20 text-yellow-400' :
-                          'bg-gray-500/20 text-gray-400'
-                        }`}>
-                          {job.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-gray-300">{job.location || job.city || 'Not set'}</td>
-                      <td className="py-3 px-4 text-gray-400 text-sm">
-                        {new Date(job.created_at).toLocaleDateString()}
-                      </td>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-800">
+                      <th className="text-left py-3 px-4 text-gray-400 font-semibold">Title</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-semibold">Status</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-semibold">Location</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-semibold">Created</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {jobs.map((job) => (
+                      <tr 
+                        key={job.id} 
+                        className={`border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer ${
+                          selectedJobId === job.id ? 'bg-blue-500/10' : ''
+                        }`}
+                        onClick={() => handleJobClick(job.id)}
+                      >
+                        <td className="py-3 px-4 text-white">{job.title}</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            job.status === 'published' ? 'bg-green-500/20 text-green-400' :
+                            job.status === 'draft' ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {job.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-gray-300">{job.location || job.city || 'Not set'}</td>
+                        <td className="py-3 px-4 text-gray-400 text-sm">
+                          {new Date(job.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Applicants Panel */}
+              <div className="dashboard-card rounded-xl p-6">
+                <h3 className="text-xl font-bold text-white mb-4">
+                  {selectedJobId ? 'Applicants' : 'Select a job to view applicants'}
+                </h3>
+                {selectedJobId && applicants.length > 0 ? (
+                  <div className="space-y-3">
+                    {applicants.map((applicant) => (
+                      <div key={applicant.id} className="border border-gray-800 rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="text-white font-semibold">{applicant.talent_name || 'Unknown'}</p>
+                            {applicant.talent_title && (
+                              <p className="text-gray-400 text-sm">{applicant.talent_title}</p>
+                            )}
+                            {applicant.talent_email && (
+                              <p className="text-gray-500 text-xs mt-1">{applicant.talent_email}</p>
+                            )}
+                          </div>
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            applicant.status === 'applied' ? 'bg-blue-500/20 text-blue-400' :
+                            applicant.status === 'shortlisted' ? 'bg-green-500/20 text-green-400' :
+                            applicant.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                            applicant.status === 'hired' ? 'bg-purple-500/20 text-purple-400' :
+                            'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            {applicant.status}
+                          </span>
+                        </div>
+                        <p className="text-gray-500 text-xs">
+                          Applied: {new Date(applicant.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : selectedJobId ? (
+                  <p className="text-gray-400">No applicants yet</p>
+                ) : null}
+              </div>
             </div>
           ) : (
             <div className="text-center py-12">

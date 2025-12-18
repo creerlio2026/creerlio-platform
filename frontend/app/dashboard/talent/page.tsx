@@ -21,6 +21,7 @@ export default function TalentDashboard() {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [talentProfile, setTalentProfile] = useState<any>(null)
+  const [applications, setApplications] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('overview')
 
   useEffect(() => {
@@ -59,6 +60,8 @@ export default function TalentDashboard() {
       
       // Fetch talent profile (by user email)
       fetchTalentProfileByEmail(email)
+      // Fetch applications
+      fetchApplications(email)
     } catch (error: any) {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:52',message:'Fetch user info failed',data:{hasResponse:!!error.response,status:error.response?.status,code:error.code,message:error.message,isNetworkError:!error.response},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
@@ -87,6 +90,23 @@ export default function TalentDashboard() {
       }
     } catch (error) {
       console.error('Error fetching talent profile:', error)
+    }
+  }
+
+  const fetchApplications = async (email: string) => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await axios.get(`${apiUrl}/api/applications/me`, {
+        params: { email },
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
+      if (response.data && Array.isArray(response.data.applications)) {
+        setApplications(response.data.applications)
+      }
+    } catch (error) {
+      console.error('Error fetching applications:', error)
     }
   }
 
@@ -370,15 +390,46 @@ export default function TalentDashboard() {
         {activeTab === 'applications' && (
           <div className="dashboard-card rounded-xl p-6">
             <h2 className="text-2xl font-bold text-white mb-6">Job Applications</h2>
-            <div className="text-center py-12">
-              <p className="text-gray-400 mb-4">No applications yet</p>
-              <Link
-                href="/talent/search"
-                className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                Search Jobs
-              </Link>
-            </div>
+            {applications.length > 0 ? (
+              <div className="space-y-4">
+                {applications.map((app) => (
+                  <div key={app.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-semibold text-white mb-1">{app.job_title || 'Job'}</h3>
+                        {app.job_location && (
+                          <p className="text-gray-400 text-sm mb-2">📍 {app.job_location}</p>
+                        )}
+                        <p className="text-gray-500 text-sm">
+                          Applied: {new Date(app.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="ml-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          app.status === 'applied' ? 'bg-blue-500/20 text-blue-400' :
+                          app.status === 'shortlisted' ? 'bg-green-500/20 text-green-400' :
+                          app.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                          app.status === 'hired' ? 'bg-purple-500/20 text-purple-400' :
+                          'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-gray-400 mb-4">No applications yet</p>
+                <Link
+                  href="/jobs"
+                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  Browse Jobs
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </div>

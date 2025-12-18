@@ -744,6 +744,48 @@ async def get_my_talent_profile(
     return None
 
 
+@app.put("/api/talent/me")
+async def update_my_talent_profile(
+    profile_data: dict,
+    email: str,
+    db=Depends(get_db)
+):
+    """Update current user's talent profile"""
+    # Get user by email
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.user_type != "talent":
+        raise HTTPException(status_code=403, detail="Only talent users can update talent profiles")
+    
+    # Get or create talent profile
+    if user.talent_profile_id:
+        talent = db.query(TalentProfile).filter(TalentProfile.id == user.talent_profile_id).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Talent profile not found")
+    else:
+        # Create new talent profile
+        talent = TalentProfile(
+            name=profile_data.get("name", ""),
+            email=user.email,
+            user_id=user.id
+        )
+        db.add(talent)
+        db.flush()
+        user.talent_profile_id = talent.id
+    
+    # Update allowed fields only
+    allowed_fields = ["name", "title", "bio", "skills", "location", "city", "state", "country", "phone"]
+    for field in allowed_fields:
+        if field in profile_data:
+            setattr(talent, field, profile_data[field])
+    
+    db.commit()
+    db.refresh(talent)
+    return {"success": True, "talent": talent}
+
+
 @app.get("/api/talent/search")
 async def search_talent(
     query: Optional[str] = None,

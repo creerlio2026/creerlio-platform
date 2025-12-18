@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import axios from 'axios'
 
@@ -22,12 +23,30 @@ interface Job {
 }
 
 export default function JobsPage() {
+  const router = useRouter()
   const [jobs, setJobs] = useState<Job[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [appliedJobs, setAppliedJobs] = useState<Set<number>>(new Set())
+  const [applyingJobId, setApplyingJobId] = useState<number | null>(null)
   const [filters, setFilters] = useState({
     keyword: '',
     location: ''
   })
+
+  useEffect(() => {
+    // Check auth status
+    const token = localStorage.getItem('access_token')
+    const email = localStorage.getItem('user_email')
+    setIsAuthenticated(!!token && !!email)
+    setUserEmail(email)
+    
+    fetchJobs()
+    if (token && email) {
+      fetchMyApplications(email)
+    }
+  }, [filters])
 
   useEffect(() => {
     fetchJobs()
@@ -54,6 +73,55 @@ export default function JobsPage() {
       console.error('Error fetching jobs:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const fetchMyApplications = async (email: string) => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await axios.get(`${apiUrl}/api/applications/me`, {
+        params: { email },
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
+      if (response.data && Array.isArray(response.data.applications)) {
+        const appliedIds = new Set(response.data.applications.map((app: any) => app.job_id))
+        setAppliedJobs(appliedIds)
+      }
+    } catch (error) {
+      console.error('Error fetching applications:', error)
+    }
+  }
+
+  const handleApply = async (jobId: number) => {
+    if (!isAuthenticated || !userEmail) {
+      router.push('/login')
+      return
+    }
+
+    setApplyingJobId(jobId)
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      const response = await axios.post(
+        `${apiUrl}/api/applications`,
+        { job_id: jobId },
+        {
+          params: { email: userEmail },
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`
+          }
+        }
+      )
+
+      if (response.data.success) {
+        setAppliedJobs(prev => new Set([...prev, jobId]))
+      }
+    } catch (error: any) {
+      console.error('Error applying to job:', error)
+      alert(error.response?.data?.detail || 'Failed to apply. Please try again.')
+    } finally {
+      setApplyingJobId(null)
     }
   }
 
@@ -177,13 +245,32 @@ export default function JobsPage() {
                     )}
                   </div>
                   <div className="ml-6">
-                    <button
-                      disabled
-                      className="px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Apply
-                    </button>
-                    <p className="text-xs text-gray-500 mt-2 text-center">Coming soon</p>
+                    {appliedJobs.has(job.id) ? (
+                      <div className="text-center">
+                        <button
+                          disabled
+                          className="px-6 py-3 bg-green-500/20 text-green-400 rounded-lg font-semibold border border-green-500/50 cursor-not-allowed"
+                        >
+                          Applied
+                        </button>
+                        <p className="text-xs text-gray-500 mt-2">Application submitted</p>
+                      </div>
+                    ) : isAuthenticated ? (
+                      <button
+                        onClick={() => handleApply(job.id)}
+                        disabled={applyingJobId === job.id}
+                        className="px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {applyingJobId === job.id ? 'Applying...' : 'Apply'}
+                      </button>
+                    ) : (
+                      <Link
+                        href="/login"
+                        className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-center"
+                      >
+                        Login to Apply
+                      </Link>
+                    )}
                   </div>
                 </div>
               </div>
