@@ -379,6 +379,47 @@ async def get_my_business_profile(
     return None
 
 
+@app.put("/api/business/me")
+async def update_my_business_profile(
+    profile_data: dict,
+    email: str,
+    db=Depends(get_db)
+):
+    """Update current user's business profile"""
+    # Get user by email
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.user_type != "business":
+        raise HTTPException(status_code=403, detail="Only business users can update business profiles")
+    
+    # Get or create business profile
+    if user.business_profile_id:
+        business = db.query(BusinessProfile).filter(BusinessProfile.id == user.business_profile_id).first()
+        if not business:
+            raise HTTPException(status_code=404, detail="Business profile not found")
+    else:
+        # Create new business profile
+        business = BusinessProfile(
+            name=profile_data.get("name", ""),
+            email=user.email
+        )
+        db.add(business)
+        db.flush()
+        user.business_profile_id = business.id
+    
+    # Update allowed fields only
+    allowed_fields = ["name", "description", "industry", "website", "address", "city", "state", "country", "location", "phone"]
+    for field in allowed_fields:
+        if field in profile_data:
+            setattr(business, field, profile_data[field])
+    
+    db.commit()
+    db.refresh(business)
+    return {"success": True, "business": business}
+
+
 @app.get("/api/business/search")
 async def search_businesses(
     query: Optional[str] = None,
@@ -767,9 +808,8 @@ async def update_my_talent_profile(
     else:
         # Create new talent profile
         talent = TalentProfile(
-            name=profile_data.get("name", ""),
-            email=user.email,
-            user_id=user.id
+            name=profile_data.get("name", user.full_name or user.username),
+            email=user.email
         )
         db.add(talent)
         db.flush()

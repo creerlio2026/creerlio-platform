@@ -3,14 +3,30 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ssr: false,
 });
 
 export default function Home() {
+  const router = useRouter()
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'talent' | 'business'>('talent');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userType, setUserType] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check auth status
+    const token = localStorage.getItem('access_token')
+    const email = localStorage.getItem('user_email')
+    setIsAuthenticated(!!token && !!email)
+    
+    // Try to get user type from token or fetch it
+    if (token && email) {
+      // For now, we'll check on navigation
+    }
+  }, [])
 
   useEffect(() => {
     if (!navigator.geolocation) {

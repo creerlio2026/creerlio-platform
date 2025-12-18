@@ -194,7 +194,15 @@ export default function BusinessDashboard() {
         {/* Business Summary */}
         <div className="grid md:grid-cols-3 gap-6 mb-8">
           <div className="dashboard-card rounded-xl p-6">
-            <h2 className="text-xl font-bold text-white mb-2">Business Name</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xl font-bold text-white">Business Name</h2>
+              <Link
+                href="/dashboard/business/edit"
+                className="text-blue-400 hover:text-blue-300 text-sm"
+              >
+                Edit
+              </Link>
+            </div>
             <p className="text-gray-300 text-lg">{businessProfile?.name || 'Not set'}</p>
           </div>
           <div className="dashboard-card rounded-xl p-6">
