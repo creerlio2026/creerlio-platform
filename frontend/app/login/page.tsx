@@ -8,7 +8,8 @@ import axios from 'axios'
 export default function LoginPage() {
   const router = useRouter()
   const [formData, setFormData] = useState({
-    email: ''
+    email: '',
+    password: ''
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)

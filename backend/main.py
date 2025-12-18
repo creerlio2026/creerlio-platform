@@ -6,7 +6,7 @@ FastAPI application with AI resume parsing, business profiles, and mapping featu
 import json
 import time
 import os
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Body
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Body, Query
 from pydantic import ValidationError  # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -489,7 +489,7 @@ async def delete_business(business_id: int, db=Depends(get_db)):
 
 @app.get("/api/business/me")
 async def get_my_business_profile(
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Get current user's business profile"""
@@ -514,7 +514,7 @@ async def get_my_business_profile(
 @app.put("/api/business/me")
 async def update_my_business_profile(
     profile_data: dict,
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Update current user's business profile"""
@@ -710,7 +710,7 @@ async def get_public_jobs(
 @app.post("/api/applications")
 async def create_application(
     application_data: dict,
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Create a new job application (talent only)"""
@@ -785,7 +785,7 @@ async def create_application(
 
 @app.get("/api/applications/me")
 async def get_my_applications(
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Get current user's applications (talent only)"""
@@ -826,7 +826,7 @@ async def get_my_applications(
 @app.get("/api/applications/job/{job_id}")
 async def get_job_applications(
     job_id: int,
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Get applications for a specific job (business owner only)"""
@@ -898,7 +898,7 @@ async def get_talent(talent_id: int, db=Depends(get_db)):
 
 @app.get("/api/talent/me")
 async def get_my_talent_profile(
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Get current user's talent profile"""
@@ -920,7 +920,7 @@ async def get_my_talent_profile(
 @app.put("/api/talent/me")
 async def update_my_talent_profile(
     profile_data: dict,
-    email: str,
+    email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Update current user's talent profile"""
