@@ -3,11 +3,17 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
+
+const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
+  ssr: false,
+})
 
 export default function AboutPage() {
   const router = useRouter()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [userType, setUserType] = useState<string | null>(null)
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
 
   useEffect(() => {
     const token = localStorage.getItem('access_token')
@@ -18,6 +24,25 @@ export default function AboutPage() {
     if (storedUserType) {
       setUserType(storedUserType)
     }
+  }, [])
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocation({ lat: -33.8688, lng: 151.2093 })
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        })
+      },
+      () => {
+        setLocation({ lat: -33.8688, lng: 151.2093 })
+      }
+    )
   }, [])
 
   return (
@@ -109,20 +134,15 @@ export default function AboutPage() {
                 and forward-thinking businesses.
               </p>
             </div>
-            <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-300">Match Accuracy</span>
-                  <span className="text-2xl font-bold text-green-400">84.38%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-300">Active Talent</span>
-                  <span className="text-2xl font-bold text-blue-400">655K+</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-300">Businesses</span>
-                  <span className="text-2xl font-bold text-purple-400">12K+</span>
-                </div>
+            <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6">
+              <div className="relative h-[400px] rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                {location ? (
+                  <MapboxMap center={location} zoom={10} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400">
+                    Loading map...
+                  </div>
+                )}
               </div>
             </div>
           </section>
