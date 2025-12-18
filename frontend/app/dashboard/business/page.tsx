@@ -104,9 +104,13 @@ export default function BusinessDashboard() {
       })
       if (response.data && Array.isArray(response.data.jobs)) {
         setJobs(response.data.jobs)
+      } else if (response.data && response.data.jobs) {
+        setJobs(response.data.jobs)
       }
     } catch (error) {
       console.error('Error fetching jobs:', error)
+      // Set empty array on error
+      setJobs([])
     }
   }
 
