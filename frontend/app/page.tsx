@@ -16,6 +16,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'talent' | 'business'>('talent');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userType, setUserType] = useState<string | null>(null);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   useEffect(() => {
     // Set active tab based on URL hash
@@ -205,31 +206,66 @@ export default function Home() {
       {/* ================= TALENT CONTENT ================= */}
       {activeTab === 'talent' ? (
         <>
-          {/* Hero Section */}
+          {/* Hero Section with Map */}
           <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="text-center space-y-6">
-              <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-                Empower Yourself with a <span className="text-blue-400">CREERLIO Talent Portfolio</span>
-              </h1>
-              <div className="flex items-center justify-center gap-4">
-                <p className="text-2xl font-bold text-blue-400">See MORE</p>
-                <p className="text-xl text-slate-300">Far more than just a Resume!</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              {/* Hero Text - Left Side */}
+              <div className="space-y-6 text-left">
+                <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
+                  Empower Yourself with a <span className="text-blue-400">CREERLIO Talent Portfolio</span>
+                </h1>
+                <div className="flex items-center gap-4">
+                  <p className="text-2xl font-bold text-blue-400">See MORE</p>
+                  <p className="text-xl text-slate-300">Far more than just a Resume!</p>
+                </div>
+                <p className="text-lg text-slate-300">
+                  At <span className="text-green-400 font-semibold">NO COST</span> to You to Build, Maintain and Connect Your Private Portfolio
+                </p>
               </div>
-              <p className="text-lg text-slate-300">
-                At <span className="text-green-400 font-semibold">NO COST</span> to You to Build, Maintain and Connect Your Private Portfolio
-              </p>
-            </div>
-          </section>
 
-          {/* Map Section */}
-          <section className="max-w-7xl mx-auto px-8 py-12">
-            <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
-              <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
-                {location ? (
-                  <MapboxMap center={location} zoom={10} />
+              {/* Map - Right Side */}
+              <div className="flex justify-end">
+                {isMapExpanded ? (
+                  <div 
+                    className="fixed inset-4 z-50 bg-slate-900/95 backdrop-blur-sm rounded-2xl border border-blue-500/20 shadow-2xl p-6"
+                    onClick={() => setIsMapExpanded(false)}
+                  >
+                    <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                      {location ? (
+                        <MapboxMap center={location} zoom={12} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-400">
+                          Loading map...
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setIsMapExpanded(false)
+                      }}
+                      className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
+                    >
+                      Close
+                    </button>
+                  </div>
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-slate-400">
-                    Loading map...
+                  <div 
+                    className="relative w-[400px] h-[400px] rounded-2xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-4 cursor-pointer hover:border-blue-500/50 transition-all"
+                    onClick={() => setIsMapExpanded(true)}
+                  >
+                    <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                      {location ? (
+                        <MapboxMap center={location} zoom={10} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-400">
+                          Loading map...
+                        </div>
+                      )}
+                    </div>
+                    <div className="absolute bottom-4 right-4 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
+                      Click to expand
+                    </div>
                   </div>
                 )}
               </div>
