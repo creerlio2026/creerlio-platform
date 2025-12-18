@@ -202,40 +202,170 @@ export default function Home() {
         </div>
       </header>
 
-      {/* ================= HERO ================= */}
-      <section className="max-w-7xl mx-auto px-8 py-28 grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
-
-        {/* LEFT COPY - Hero text aligned left */}
-        <div className="space-y-8 text-left">
-          {activeTab === 'talent' ? (
-            <>
+      {/* ================= TALENT CONTENT ================= */}
+      {activeTab === 'talent' ? (
+        <>
+          {/* Hero Section */}
+          <section className="max-w-7xl mx-auto px-8 py-16">
+            <div className="text-center space-y-6">
               <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-                Find Your Next<br />
-                <span className="text-blue-400 drop-shadow-[0_0_30px_rgba(96,165,250,0.9)]">
-                  Opportunity
-                </span>
+                Empower Yourself with a <span className="text-blue-400">CREERLIO Talent Portfolio</span>
               </h1>
-              <p className="text-lg text-slate-300 max-w-xl leading-relaxed">
-                Showcase your skills with rich multimedia portfolios, connect with top employers,
-                and leverage AI-powered matching to find the perfect role.
-              </p>
-              <div className="flex gap-4">
-                <Link
-                  href="/register"
-                  className="px-6 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 font-semibold"
-                >
-                  Create Profile
-                </Link>
-                <Link
-                  href="/dashboard/talent"
-                  className="px-6 py-3 rounded-xl border border-blue-400/60 text-blue-300 hover:bg-blue-500/10"
-                >
-                  Talent Dashboard
-                </Link>
+              <div className="flex items-center justify-center gap-4">
+                <p className="text-2xl font-bold text-blue-400">See MORE</p>
+                <p className="text-xl text-slate-300">Far more than just a Resume!</p>
               </div>
-            </>
-          ) : (
-            <>
+              <p className="text-lg text-slate-300">
+                At <span className="text-green-400 font-semibold">NO COST</span> to You to Build, Maintain and Connect Your Private Portfolio
+              </p>
+            </div>
+          </section>
+
+          {/* Map Section */}
+          <section className="max-w-7xl mx-auto px-8 py-12">
+            <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
+              <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                {location ? (
+                  <MapboxMap center={location} zoom={10} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400">
+                    Loading map...
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Visibility and Opportunities */}
+          <section className="max-w-7xl mx-auto px-8 py-16">
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
+                <div className="h-64 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl flex items-center justify-center">
+                  <div className="text-6xl">📊</div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <h2 className="text-4xl font-bold text-white">Visibility and Opportunities</h2>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Showcase Skills and Achievements:</h3>
+                    <p className="text-slate-300">Professional portfolios provide a platform to highlight talents comprehensively.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Increased Exposure:</h3>
+                    <p className="text-slate-300">Continuous engagement with multiple businesses increases chances of finding the right job.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Career Development:</h3>
+                    <p className="text-slate-300">Opportunities for feedback and mentorship from business interactions.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Take Initiative:</h3>
+                    <p className="text-slate-300">Proactively reaching out to employers shows initiative and enthusiasm, setting you apart from other candidates who wait for job postings.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Maintain Control of Privacy */}
+          <section className="max-w-7xl mx-auto px-8 py-16">
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
+                <div className="h-64 bg-gradient-to-br from-green-500/20 to-blue-500/20 rounded-xl flex items-center justify-center relative">
+                  <div className="text-6xl">🤝</div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-16 h-16 bg-blue-500/80 rounded-full flex items-center justify-center border-4 border-white">
+                      <div className="w-8 h-8 bg-white rounded"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <h2 className="text-4xl font-bold text-white">Maintain Control of your Privacy and Information</h2>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Privacy of Information:</h3>
+                    <p className="text-slate-300">No longer will you lose control of your information like you currently do when you apply for Jobs or send your Resume and documents for employment consideration. You choose what Business see when they see it and how long they see it for!</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Avoiding Unsolicited Offers:</h3>
+                    <p className="text-slate-300">Controlling your information helps prevent your data from being sold or shared without your consent, leading to unsolicited job offers or marketing communications.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Better Fit and Satisfaction */}
+          <section className="max-w-7xl mx-auto px-8 py-16">
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
+                <div className="h-64 bg-white rounded-xl flex items-center justify-center">
+                  <div className="text-6xl">🧩</div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <h2 className="text-4xl font-bold text-white">Better Fit and Satisfaction</h2>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Cultural Alignment:</h3>
+                    <p className="text-slate-300">Better chances of finding a company that aligns with personal values and career goals.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Long-Term Relationships:</h3>
+                    <p className="text-slate-300">Building relationships with businesses leads to more stable and fulfilling careers.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Flexibility:</h3>
+                    <p className="text-slate-300">A better fit often includes a company that supports a healthy work-life balance, offering flexible working hours, remote work options, and understanding personal commitments.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Positive Work Environment:</h3>
+                    <p className="text-slate-300">A good fit often translates to a positive, supportive work environment that promotes mental and physical well-being.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Wasted Time in Job Search */}
+          <section className="max-w-7xl mx-auto px-8 py-16">
+            <div className="grid md:grid-cols-2 gap-12 items-center">
+              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
+                <div className="h-64 bg-red-500 rounded-xl flex items-center justify-center">
+                  <div className="text-6xl text-white">👥</div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <h2 className="text-4xl font-bold text-white">Wasted Time in the Job Search Process</h2>
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Tailoring Resumes and Cover Letters:</h3>
+                    <p className="text-slate-300">Customizing your resume and cover letter for each job application takes considerable time.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Filling Out Online Forms:</h3>
+                    <p className="text-slate-300">Many job applications require detailed online forms, which can be repetitive and time-consuming.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Scheduling and Attending Interviews:</h3>
+                    <p className="text-slate-300">Coordinating schedules, traveling to the interview location, and attending multiple rounds of interviews can consume several hours or even days.</p>
+                  </div>
+                  <div>
+                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Researching Companies:</h3>
+                    <p className="text-slate-300">Understanding the company's history, culture, and values requires thorough research.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          {/* Business Content - Keep existing */}
+          <section className="max-w-7xl mx-auto px-8 py-28 grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
+            <div className="space-y-8 text-left">
               <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
                 Hire Smarter with<br />
                 <span className="text-blue-400 drop-shadow-[0_0_30px_rgba(96,165,250,0.9)]">
@@ -260,60 +390,24 @@ export default function Home() {
                   Business Dashboard
                 </Link>
               </div>
-            </>
-          )}
-        </div>
+            </div>
 
-        {/* RIGHT VISUAL - Map aligned right */}
-        <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
-          {/* MAP - Centered on user location */}
-          <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
-            {location ? (
-              <MapboxMap center={location} zoom={10} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-400">
-                Loading map...
+            <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
+              <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                {location ? (
+                  <MapboxMap center={location} zoom={10} />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-slate-400">
+                    Loading map...
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      </section>
+            </div>
+          </section>
 
-      {/* ================= FEATURES ================= */}
-      <section className="max-w-7xl mx-auto px-8 py-28">
-        <h2 className="text-4xl font-bold mb-14 text-left">
-          {activeTab === 'talent' ? 'For Talent' : 'For Business'}
-        </h2>
-
-        <div className="grid md:grid-cols-3 gap-8 lg:gap-10">
-          {activeTab === 'talent' ? (
-            <>
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">Rich Multimedia Portfolios</h3>
-                <p className="text-slate-400">
-                  Go beyond CVs with video, images, credentials, and interactive
-                  talent profiles designed for modern hiring.
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">AI-Powered Matching</h3>
-                <p className="text-slate-400">
-                  Get matched with opportunities that align with your skills,
-                  experience, and career goals.
-                </p>
-              </div>
-
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">Location Insights</h3>
-                <p className="text-slate-400">
-                  Discover opportunities based on location preferences,
-                  commute zones, and relocation feasibility.
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
+          <section className="max-w-7xl mx-auto px-8 py-28">
+            <h2 className="text-4xl font-bold mb-14 text-left">For Business</h2>
+            <div className="grid md:grid-cols-3 gap-8 lg:gap-10">
               <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
                 <h3 className="text-xl font-semibold mb-3">Business Intelligence</h3>
                 <p className="text-slate-400">
@@ -321,7 +415,6 @@ export default function Home() {
                   built for scale.
                 </p>
               </div>
-
               <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
                 <h3 className="text-xl font-semibold mb-3">Talent Discovery</h3>
                 <p className="text-slate-400">
@@ -329,7 +422,6 @@ export default function Home() {
                   and location-based search capabilities.
                 </p>
               </div>
-
               <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
                 <h3 className="text-xl font-semibold mb-3">Location Intelligence</h3>
                 <p className="text-slate-400">
@@ -337,10 +429,10 @@ export default function Home() {
                   commute zones, and opportunity distribution.
                 </p>
               </div>
-            </>
-          )}
-        </div>
-      </section>
+            </div>
+          </section>
+        </>
+      )}
 
     </div>
   );
