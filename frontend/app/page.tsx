@@ -18,6 +18,25 @@ export default function Home() {
   const [userType, setUserType] = useState<string | null>(null);
 
   useEffect(() => {
+    // Set active tab based on URL hash
+    const hash = window.location.hash
+    if (hash === '#business') {
+      setActiveTab('business')
+    } else if (hash === '#talent') {
+      setActiveTab('talent')
+    }
+
+    // Listen for hash changes
+    const handleHashChange = () => {
+      const newHash = window.location.hash
+      if (newHash === '#business') {
+        setActiveTab('business')
+      } else if (newHash === '#talent') {
+        setActiveTab('talent')
+      }
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    
     // Check auth status
     const checkAuth = () => {
       const token = localStorage.getItem('access_token')
@@ -52,7 +71,10 @@ export default function Home() {
     checkAuth()
     // Listen for storage changes (logout from other tabs)
     window.addEventListener('storage', checkAuth)
-    return () => window.removeEventListener('storage', checkAuth)
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange)
+      window.removeEventListener('storage', checkAuth)
+    }
   }, [])
 
   useEffect(() => {
@@ -145,7 +167,10 @@ export default function Home() {
           {/* Tabs */}
           <div className="flex items-center gap-2 border-b border-white/10">
             <button
-              onClick={() => setActiveTab('talent')}
+              onClick={() => {
+                setActiveTab('talent')
+                window.location.hash = '#talent'
+              }}
               className={`px-6 py-3 text-sm font-medium transition-all relative ${
                 activeTab === 'talent'
                   ? 'text-blue-400'
@@ -158,7 +183,10 @@ export default function Home() {
               )}
             </button>
             <button
-              onClick={() => setActiveTab('business')}
+              onClick={() => {
+                setActiveTab('business')
+                window.location.hash = '#business'
+              }}
               className={`px-6 py-3 text-sm font-medium transition-all relative ${
                 activeTab === 'business'
                   ? 'text-blue-400'
