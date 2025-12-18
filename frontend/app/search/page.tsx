@@ -199,12 +199,16 @@ export default function SearchPage() {
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:65',message:'Searching jobs',data:{url:`${apiUrl}/api/jobs/public`,params:{keyword:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
-        const response = await axios.get(`${apiUrl}/api/jobs/public`, {
-          params: {
-            keyword: searchQuery || undefined,
-            location: location || undefined
-          }
-        })
+        // Build params object, only including non-empty values
+        const params: Record<string, string> = {}
+        if (searchQuery && searchQuery.trim()) {
+          params.keyword = searchQuery.trim()
+        }
+        if (location && location.trim()) {
+          params.location = location.trim()
+        }
+        
+        const response = await axios.get(`${apiUrl}/api/jobs/public`, { params })
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:73',message:'Jobs search succeeded',data:{count:response.data?.jobs?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
@@ -213,12 +217,16 @@ export default function SearchPage() {
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:77',message:'Searching talent',data:{url:`${apiUrl}/api/talent/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
-        const response = await axios.get(`${apiUrl}/api/talent/search`, {
-          params: {
-            query: searchQuery || undefined,
-            location: location || undefined
-          }
-        })
+        // Build params object, only including non-empty values
+        const params: Record<string, string> = {}
+        if (searchQuery && searchQuery.trim()) {
+          params.query = searchQuery.trim()
+        }
+        if (location && location.trim()) {
+          params.location = location.trim()
+        }
+        
+        const response = await axios.get(`${apiUrl}/api/talent/search`, { params })
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:85',message:'Talent search succeeded',data:{count:response.data?.talents?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
@@ -227,12 +235,16 @@ export default function SearchPage() {
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:89',message:'Searching businesses',data:{url:`${apiUrl}/api/business/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
-        const response = await axios.get(`${apiUrl}/api/business/search`, {
-          params: {
-            query: searchQuery || undefined,
-            location: location || undefined
-          }
-        })
+        // Build params object, only including non-empty values
+        const params: Record<string, string> = {}
+        if (searchQuery && searchQuery.trim()) {
+          params.query = searchQuery.trim()
+        }
+        if (location && location.trim()) {
+          params.location = location.trim()
+        }
+        
+        const response = await axios.get(`${apiUrl}/api/business/search`, { params })
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:97',message:'Business search succeeded',data:{count:response.data?.businesses?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
@@ -243,7 +255,28 @@ export default function SearchPage() {
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:101',message:'Search failed',data:{error:err.message,code:err.code,hasResponse:!!err.response,status:err.response?.status,searchType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
       console.error('Search error:', err)
-      setError(err.response?.data?.detail || err.message || 'Search failed. Please try again.')
+      
+      // Format error message - handle FastAPI validation errors (arrays) and string errors
+      let errorMessage = 'Search failed. Please try again.'
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail
+        if (Array.isArray(detail)) {
+          // FastAPI validation errors come as an array of objects
+          errorMessage = detail.map((error: any) => {
+            const field = error.loc?.join('.') || 'field'
+            const msg = error.msg || 'Validation error'
+            return `${field}: ${msg}`
+          }).join(', ')
+        } else if (typeof detail === 'string') {
+          errorMessage = detail
+        } else {
+          errorMessage = JSON.stringify(detail)
+        }
+      } else if (err.message) {
+        errorMessage = err.message
+      }
+      
+      setError(errorMessage)
     } finally {
       setIsSearching(false)
     }
