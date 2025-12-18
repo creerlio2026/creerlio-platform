@@ -355,6 +355,30 @@ async def delete_business(business_id: int, db=Depends(get_db)):
     return {"success": True, "message": "Business deleted"}
 
 
+@app.get("/api/business/me")
+async def get_my_business_profile(
+    email: str,
+    db=Depends(get_db)
+):
+    """Get current user's business profile"""
+    # Get user by email
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.user_type != "business":
+        raise HTTPException(status_code=403, detail="User is not a business")
+    
+    # Get business profile if exists
+    if user.business_profile_id:
+        business = db.query(BusinessProfile).filter(BusinessProfile.id == user.business_profile_id).first()
+        if business:
+            return business
+    
+    # Return null if no profile exists
+    return None
+
+
 @app.get("/api/business/search")
 async def search_businesses(
     query: Optional[str] = None,
@@ -377,6 +401,135 @@ async def search_businesses(
     
     results = businesses.offset(skip).limit(limit).all()
     return {"businesses": results, "count": len(results)}
+
+
+# ==================== Jobs ====================
+
+@app.post("/api/jobs")
+async def create_job(job_data: dict, db=Depends(get_db)):
+    """Create a new job posting"""
+    try:
+        # Validate required fields
+        if not job_data.get("title"):
+            raise HTTPException(status_code=400, detail="Title is required")
+        if not job_data.get("business_profile_id"):
+            raise HTTPException(status_code=400, detail="business_profile_id is required")
+        
+        # Create job with defaults
+        job = Job(
+            business_profile_id=job_data["business_profile_id"],
+            title=job_data["title"],
+            description=job_data.get("description"),
+            requirements=job_data.get("requirements"),
+            responsibilities=job_data.get("responsibilities"),
+            employment_type=job_data.get("employment_type"),
+            salary_min=job_data.get("salary_min"),
+            salary_max=job_data.get("salary_max"),
+            salary_currency=job_data.get("salary_currency", "USD"),
+            remote_allowed=job_data.get("remote_allowed", False),
+            address=job_data.get("address"),
+            city=job_data.get("city"),
+            state=job_data.get("state"),
+            country=job_data.get("country"),
+            postal_code=job_data.get("postal_code"),
+            latitude=job_data.get("latitude"),
+            longitude=job_data.get("longitude"),
+            location=job_data.get("location"),
+            required_skills=job_data.get("required_skills", []),
+            preferred_skills=job_data.get("preferred_skills", []),
+            experience_level=job_data.get("experience_level"),
+            education_level=job_data.get("education_level"),
+            status=job_data.get("status", "draft"),
+            is_active=job_data.get("is_active", True),
+            application_url=job_data.get("application_url"),
+            application_email=job_data.get("application_email"),
+            application_deadline=job_data.get("application_deadline"),
+            tags=job_data.get("tags", []),
+            extra_metadata=job_data.get("extra_metadata")
+        )
+        
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {"success": True, "job": job}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create job: {str(e)}")
+
+
+@app.get("/api/jobs")
+async def get_jobs(
+    business_user_id: Optional[int] = None,
+    business_profile_id: Optional[int] = None,
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db=Depends(get_db)
+):
+    """Get jobs with optional filtering"""
+    query = db.query(Job)
+    
+    # Filter by business user (get business_profile_id from user)
+    if business_user_id:
+        user = db.query(User).filter(User.id == business_user_id).first()
+        if user and user.business_profile_id:
+            query = query.filter(Job.business_profile_id == user.business_profile_id)
+    
+    # Filter by business profile
+    if business_profile_id:
+        query = query.filter(Job.business_profile_id == business_profile_id)
+    
+    # Filter by status
+    if status:
+        query = query.filter(Job.status == status)
+    
+    # Only show active jobs
+    query = query.filter(Job.is_active == True)
+    
+    jobs = query.offset(skip).limit(limit).all()
+    return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: int, db=Depends(get_db)):
+    """Get job by ID"""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/jobs/public")
+async def get_public_jobs(
+    location: Optional[str] = None,
+    keyword: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db=Depends(get_db)
+):
+    """Get published jobs (public endpoint)"""
+    query = db.query(Job).filter(
+        Job.status == "published",
+        Job.is_active == True
+    )
+    
+    if keyword:
+        query = query.filter(
+            (Job.title.ilike(f"%{keyword}%")) |
+            (Job.description.ilike(f"%{keyword}%"))
+        )
+    
+    if location:
+        query = query.filter(
+            (Job.location.ilike(f"%{location}%")) |
+            (Job.city.ilike(f"%{location}%")) |
+            (Job.country.ilike(f"%{location}%"))
+        )
+    
+    jobs = query.offset(skip).limit(limit).all()
+    return {"jobs": jobs, "count": len(jobs)}
 
 
 # ==================== Talent Profiles ====================
@@ -402,6 +555,27 @@ async def get_talent(talent_id: int, db=Depends(get_db)):
     if not talent:
         raise HTTPException(status_code=404, detail="Talent not found")
     return talent
+
+
+@app.get("/api/talent/me")
+async def get_my_talent_profile(
+    email: str,
+    db=Depends(get_db)
+):
+    """Get current user's talent profile"""
+    # Get user by email
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get talent profile if exists
+    if user.talent_profile_id:
+        talent = db.query(TalentProfile).filter(TalentProfile.id == user.talent_profile_id).first()
+        if talent:
+            return talent
+    
+    # Return null if no profile exists
+    return None
 
 
 @app.get("/api/talent/search")

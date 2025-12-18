@@ -57,10 +57,8 @@ export default function TalentDashboard() {
       // #endregion
       setUser(response.data)
       
-      // Fetch talent profile if exists
-      if (response.data.talent_profile_id) {
-        fetchTalentProfile(response.data.talent_profile_id)
-      }
+      // Fetch talent profile (by user email)
+      fetchTalentProfileByEmail(email)
     } catch (error: any) {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:52',message:'Fetch user info failed',data:{hasResponse:!!error.response,status:error.response?.status,code:error.code,message:error.message,isNetworkError:!error.response},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
@@ -75,14 +73,39 @@ export default function TalentDashboard() {
     }
   }
 
-  const fetchTalentProfile = async (talentId: number) => {
+  const fetchTalentProfileByEmail = async (email: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await axios.get(`${apiUrl}/api/talent/${talentId}`)
-      setTalentProfile(response.data)
+      const response = await axios.get(`${apiUrl}/api/talent/me`, {
+        params: { email },
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`
+        }
+      })
+      if (response.data) {
+        setTalentProfile(response.data)
+      }
     } catch (error) {
       console.error('Error fetching talent profile:', error)
     }
+  }
+
+  // Calculate profile completion percentage
+  const calculateProfileCompletion = (): number => {
+    if (!talentProfile) return 0
+    
+    const fields = [
+      talentProfile.name,
+      talentProfile.email,
+      talentProfile.title,
+      talentProfile.bio,
+      talentProfile.skills && Array.isArray(talentProfile.skills) && talentProfile.skills.length > 0,
+      talentProfile.location || (talentProfile.city && talentProfile.country),
+      talentProfile.portfolio_url || talentProfile.portfolio_data
+    ]
+    
+    const completedFields = fields.filter(Boolean).length
+    return Math.round((completedFields / fields.length) * 100)
   }
 
   const handleLogout = () => {
@@ -206,16 +229,23 @@ export default function TalentDashboard() {
                 <h2 className="text-xl font-bold text-white mb-4">Profile Summary</h2>
                 {user && (
                   <div className="space-y-2">
+                    <p className="text-gray-300"><span className="text-gray-500">Name:</span> {talentProfile?.name || user.full_name || user.username}</p>
                     <p className="text-gray-300"><span className="text-gray-500">Email:</span> {user.email}</p>
-                    <p className="text-gray-300"><span className="text-gray-500">Username:</span> {user.username}</p>
-                    {user.full_name && (
-                      <p className="text-gray-300"><span className="text-gray-500">Name:</span> {user.full_name}</p>
+                    {talentProfile?.title && (
+                      <p className="text-gray-300"><span className="text-gray-500">Title:</span> {talentProfile.title}</p>
                     )}
-                    <p className="text-gray-300"><span className="text-gray-500">Status:</span> 
-                      <span className={`ml-2 px-2 py-1 rounded text-xs ${user.is_active ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                        {user.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </p>
+                    <div className="pt-2 border-t border-gray-800">
+                      <p className="text-gray-500 text-sm mb-1">Profile Completion</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-gray-700 rounded-full h-2">
+                          <div 
+                            className="bg-blue-500 h-2 rounded-full transition-all"
+                            style={{ width: `${calculateProfileCompletion()}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-blue-400 font-semibold">{calculateProfileCompletion()}%</span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
