@@ -64,6 +64,7 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null)
   const [mapMarkers, setMapMarkers] = useState<MapMarker[]>([])
   const [isGeocoding, setIsGeocoding] = useState(false)
+  const [isMapExpanded, setIsMapExpanded] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('access_token')
@@ -435,20 +436,55 @@ export default function SearchPage() {
             </div>
 
             {/* Map - Right Side */}
-            <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6">
-              <div className="h-[600px] w-full">
-                {isGeocoding ? (
-                  <div className="h-full flex items-center justify-center bg-slate-800/50 rounded-lg">
-                    <div className="text-center">
-                      <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                      <p className="text-slate-300">Geocoding locations...</p>
+            {isMapExpanded ? (
+              <div 
+                className="fixed inset-4 z-50 bg-slate-900/95 backdrop-blur-sm rounded-2xl border border-blue-500/20 shadow-2xl p-6"
+                onClick={() => setIsMapExpanded(false)}
+              >
+                <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                  {isGeocoding ? (
+                    <div className="h-full flex items-center justify-center bg-slate-800/50 rounded-lg">
+                      <div className="text-center">
+                        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className="text-slate-300">Geocoding locations...</p>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <SearchMap markers={mapMarkers} />
-                )}
+                  ) : (
+                    <SearchMap markers={mapMarkers} />
+                  )}
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsMapExpanded(false)
+                  }}
+                  className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
+                >
+                  Close
+                </button>
               </div>
-            </div>
+            ) : (
+              <div 
+                className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6 cursor-pointer hover:border-blue-500/50 transition-all relative"
+                onClick={() => setIsMapExpanded(true)}
+              >
+                <div className="h-[600px] w-full">
+                  {isGeocoding ? (
+                    <div className="h-full flex items-center justify-center bg-slate-800/50 rounded-lg">
+                      <div className="text-center">
+                        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className="text-slate-300">Geocoding locations...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <SearchMap markers={mapMarkers} />
+                  )}
+                </div>
+                <div className="absolute bottom-6 right-6 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
+                  Click to expand
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Error Message */}
