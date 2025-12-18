@@ -204,7 +204,7 @@ export default function RegisterPage() {
                   name="user_type"
                   value={formData.user_type}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 bg-slate-800 border border-blue-500/20 rounded-lg text-white focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black focus:outline-none focus:border-blue-500 transition-colors"
                 >
                   <option value="talent">Talent / Job Seeker</option>
                   <option value="business">Business / Employer</option>
@@ -221,7 +221,7 @@ export default function RegisterPage() {
                   name="full_name"
                   value={formData.full_name}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
                   placeholder="John Doe"
                 />
               </div>
@@ -237,7 +237,7 @@ export default function RegisterPage() {
                   value={formData.email}
                   onChange={handleChange}
                   required
-                  className={`w-full px-4 py-3 bg-slate-800 border rounded-lg text-white placeholder-gray-500 focus:outline-none transition-colors ${
+                  className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder-gray-400 focus:outline-none transition-colors ${
                     errors.email ? 'border-red-500' : 'border-blue-500/20 focus:border-blue-500'
                   }`}
                   placeholder="you@example.com"
@@ -256,7 +256,7 @@ export default function RegisterPage() {
                   value={formData.username}
                   onChange={handleChange}
                   required
-                  className={`w-full px-4 py-3 bg-slate-800 border rounded-lg text-white placeholder-gray-500 focus:outline-none transition-colors ${
+                  className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder-gray-400 focus:outline-none transition-colors ${
                     errors.username ? 'border-red-500' : 'border-blue-500/20 focus:border-blue-500'
                   }`}
                   placeholder="johndoe"

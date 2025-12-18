@@ -22,7 +22,7 @@ except:
     pass
 # #endregion
 
-from app.models import BusinessProfile, TalentProfile, ResumeData, User
+from app.models import BusinessProfile, TalentProfile, ResumeData, User, Job
 from app.ai_service import AIService
 try:
     from app.pdf_generator import PDFGenerator

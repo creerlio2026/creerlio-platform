@@ -37,20 +37,27 @@ export default function Home() {
       {/* ================= NAVBAR ================= */}
       <header className="sticky top-0 z-50 backdrop-blur bg-slate-950/70 border-b border-white/10">
         <div className="max-w-7xl mx-auto px-8 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-4xl font-bold">
-              <span className="text-blue-400">C</span>reerlio
-            </div>
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-blue-400 transition-colors">
+              Creerlio
+            </Link>
 
-            <nav className="hidden lg:flex items-center gap-[10mm] text-sm text-slate-300">
-              <Link href="/about" className="hover:text-blue-400">About</Link>
-              <Link href="/analytics" className="hover:text-blue-400">Analytics</Link>
-              <Link href="/search" className="hover:text-blue-400">Search</Link>
+            {/* Navigation Links */}
+            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
+              <Link href="/about" className="hover:text-blue-400 transition-colors">About</Link>
+              <Link href="/#talent" className="hover:text-blue-400 transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-blue-400 transition-colors">Business</Link>
+              <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
+              <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
+              <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
+              <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
             </nav>
 
+            {/* CTA Button */}
             <Link
               href="/register"
-              className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm ml-8"
+              className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
             >
               Free Trial
             </Link>
@@ -89,10 +96,10 @@ export default function Home() {
       </header>
 
       {/* ================= HERO ================= */}
-      <section className="max-w-7xl mx-auto px-8 py-28 grid grid-cols-1 lg:grid-cols-2 gap-24 items-center">
+      <section className="max-w-7xl mx-auto px-8 py-28 grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
 
-        {/* LEFT COPY */}
-        <div className="space-y-8">
+        {/* LEFT COPY - Hero text aligned left */}
+        <div className="space-y-8 text-left">
           {activeTab === 'talent' ? (
             <>
               <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
@@ -150,25 +157,29 @@ export default function Home() {
           )}
         </div>
 
-        {/* RIGHT VISUAL */}
+        {/* RIGHT VISUAL - Stats and Map aligned right */}
         <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
 
-          {/* STATS */}
+          {/* STATS - Aligned right */}
           <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="rounded-xl bg-slate-800/70 p-5">
+            <div className="rounded-xl bg-slate-800/70 p-5 text-right">
               <div className="text-green-400 text-3xl font-bold">84.38%</div>
               <div className="text-slate-400 text-sm">Match Accuracy</div>
             </div>
-            <div className="rounded-xl bg-slate-800/70 p-5">
+            <div className="rounded-xl bg-slate-800/70 p-5 text-right">
               <div className="text-blue-400 text-3xl font-bold">655K</div>
               <div className="text-slate-400 text-sm">Active Talent</div>
             </div>
           </div>
 
-          {/* MAP */}
+          {/* MAP - Centered on user location */}
           <div className="relative h-[420px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
-            {location && (
+            {location ? (
               <MapboxMap center={location} zoom={10} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-400">
+                Loading map...
+              </div>
             )}
           </div>
         </div>
@@ -176,11 +187,11 @@ export default function Home() {
 
       {/* ================= FEATURES ================= */}
       <section className="max-w-7xl mx-auto px-8 py-28">
-        <h2 className="text-4xl font-bold mb-14">
+        <h2 className="text-4xl font-bold mb-14 text-left">
           {activeTab === 'talent' ? 'For Talent' : 'For Business'}
         </h2>
 
-        <div className="grid md:grid-cols-3 gap-10">
+        <div className="grid md:grid-cols-3 gap-8 lg:gap-10">
           {activeTab === 'talent' ? (
             <>
               <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">

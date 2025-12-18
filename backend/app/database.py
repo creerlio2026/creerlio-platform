@@ -1,6 +1,7 @@
 """
 Database Configuration and Session Management
 SQLAlchemy setup for Creerlio Platform
+Supports both PostgreSQL (including Supabase) and SQLite
 """
 
 import os
@@ -11,10 +12,17 @@ from contextlib import contextmanager
 from app.models import Base
 
 # Database URL from environment
+# For Supabase, use: postgresql://postgres:[PASSWORD]@[PROJECT_REF].supabase.co:5432/postgres
+# Or use Supabase connection pooler: postgresql://postgres:[PASSWORD]@[PROJECT_REF].pooler.supabase.com:6543/postgres
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://user:password@localhost:5432/creerlio_db"
 )
+
+# Supabase connection (optional - for direct Supabase client usage)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 # Create engine
 engine = create_engine(

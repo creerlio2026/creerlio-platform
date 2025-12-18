@@ -176,6 +176,64 @@ class ResumeData(Base):
     talent_profiles = relationship("TalentProfile", back_populates="resume")
 
 
+class Job(Base):
+    """Job posting model"""
+    __tablename__ = "jobs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    business_profile_id = Column(Integer, ForeignKey("business_profiles.id"), nullable=False, index=True)
+    
+    # Job details
+    title = Column(String(255), nullable=False, index=True)
+    description = Column(Text)
+    requirements = Column(Text)
+    responsibilities = Column(Text)
+    
+    # Employment details
+    employment_type = Column(String(50))  # "full-time", "part-time", "contract", "internship"
+    salary_min = Column(Float)
+    salary_max = Column(Float)
+    salary_currency = Column(String(10), default="USD")
+    remote_allowed = Column(Boolean, default=False)
+    
+    # Location
+    address = Column(String(500))
+    city = Column(String(100))
+    state = Column(String(100))
+    country = Column(String(100))
+    postal_code = Column(String(20))
+    latitude = Column(Float)
+    longitude = Column(Float)
+    location = Column(String(500))
+    
+    # Skills and requirements
+    required_skills = Column(JSON)  # List of required skills
+    preferred_skills = Column(JSON)  # List of preferred skills
+    experience_level = Column(String(50))  # "entry", "mid", "senior", "executive"
+    education_level = Column(String(50))  # "high-school", "bachelor", "master", "phd"
+    
+    # Status
+    status = Column(String(50), default="draft")  # "draft", "published", "closed", "archived"
+    is_active = Column(Boolean, default=True)
+    
+    # Application details
+    application_url = Column(String(500))
+    application_email = Column(String(255))
+    application_deadline = Column(DateTime, nullable=True)
+    
+    # Metadata
+    tags = Column(JSON)  # List of tags/categories
+    extra_metadata = Column(JSON)  # Additional flexible data
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    published_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    business_profile = relationship("BusinessProfile", backref="jobs")
+
+
 # ==================== Pydantic Models (for API) ====================
 
 class BusinessProfileCreate(BaseModel):
@@ -268,6 +326,68 @@ class ResumeDataResponse(BaseModel):
     certifications: Optional[List[Dict]]
     projects: Optional[List[Dict]]
     created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class JobCreate(BaseModel):
+    business_profile_id: int
+    title: str
+    description: Optional[str] = None
+    requirements: Optional[str] = None
+    responsibilities: Optional[str] = None
+    employment_type: Optional[str] = None
+    salary_min: Optional[float] = None
+    salary_max: Optional[float] = None
+    salary_currency: Optional[str] = "USD"
+    remote_allowed: Optional[bool] = False
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    required_skills: Optional[List[str]] = None
+    preferred_skills: Optional[List[str]] = None
+    experience_level: Optional[str] = None
+    education_level: Optional[str] = None
+    application_url: Optional[str] = None
+    application_email: Optional[str] = None
+    application_deadline: Optional[datetime] = None
+    tags: Optional[List[str]] = None
+    extra_metadata: Optional[Dict] = None
+
+
+class JobResponse(BaseModel):
+    id: int
+    business_profile_id: int
+    title: str
+    description: Optional[str]
+    requirements: Optional[str]
+    responsibilities: Optional[str]
+    employment_type: Optional[str]
+    salary_min: Optional[float]
+    salary_max: Optional[float]
+    salary_currency: Optional[str]
+    remote_allowed: Optional[bool]
+    location: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    required_skills: Optional[List[str]]
+    preferred_skills: Optional[List[str]]
+    experience_level: Optional[str]
+    education_level: Optional[str]
+    status: str
+    is_active: bool
+    application_url: Optional[str]
+    application_email: Optional[str]
+    application_deadline: Optional[datetime]
+    tags: Optional[List[str]]
+    created_at: datetime
+    updated_at: datetime
+    published_at: Optional[datetime]
     
     class Config:
         from_attributes = True
