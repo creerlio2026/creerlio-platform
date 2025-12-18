@@ -96,7 +96,7 @@ export default function JobsPage() {
 
   const handleApply = async (jobId: number) => {
     if (!isAuthenticated || !userEmail) {
-      router.push('/login')
+      router.push('/login?redirect=/jobs')
       return
     }
 
@@ -116,10 +116,18 @@ export default function JobsPage() {
 
       if (response.data.success) {
         setAppliedJobs(prev => new Set([...prev, jobId]))
+        // Refresh applications list
+        fetchMyApplications(userEmail)
       }
     } catch (error: any) {
       console.error('Error applying to job:', error)
-      alert(error.response?.data?.detail || 'Failed to apply. Please try again.')
+      const errorMessage = error.response?.data?.detail || 'Failed to apply. Please try again.'
+      alert(errorMessage)
+      
+      // If error is about profile, redirect to edit
+      if (errorMessage.includes('profile')) {
+        router.push('/dashboard/talent/edit')
+      }
     } finally {
       setApplyingJobId(null)
     }

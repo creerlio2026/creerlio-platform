@@ -75,11 +75,6 @@ export default function BusinessDashboard() {
       fetchBusinessProfile(email)
       // Fetch jobs
       fetchJobs(response.data.id)
-      
-      // If a job is selected, fetch applicants
-      if (selectedJobId) {
-        fetchJobApplicants(selectedJobId, email)
-      }
     } catch (error) {
       console.error('Error fetching user:', error)
       localStorage.removeItem('access_token')
@@ -149,14 +144,21 @@ export default function BusinessDashboard() {
   const handleJobClick = (jobId: number) => {
     const email = localStorage.getItem('user_email')
     if (email) {
-      setSelectedJobId(jobId)
-      fetchJobApplicants(jobId, email)
+      if (selectedJobId === jobId) {
+        // Deselect if clicking the same job
+        setSelectedJobId(null)
+        setApplicants([])
+      } else {
+        setSelectedJobId(jobId)
+        fetchJobApplicants(jobId, email)
+      }
     }
   }
 
   const handleLogout = () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('user_email')
+    localStorage.removeItem('user_type')
     router.push('/')
   }
 

@@ -131,6 +131,7 @@ export default function TalentDashboard() {
   const handleLogout = () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('user_email')
+    localStorage.removeItem('user_type')
     router.push('/')
   }
 
@@ -255,16 +256,24 @@ export default function TalentDashboard() {
                       <p className="text-gray-300"><span className="text-gray-500">Title:</span> {talentProfile.title}</p>
                     )}
                     <div className="pt-2 border-t border-gray-800">
-                      <p className="text-gray-500 text-sm mb-1">Profile Completion</p>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-gray-500 text-sm">Profile Completion</p>
+                        <span className="text-blue-400 font-semibold text-sm">{calculateProfileCompletion()}%</span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 bg-gray-700 rounded-full h-2">
                           <div 
                             className="bg-blue-500 h-2 rounded-full transition-all"
                             style={{ width: `${calculateProfileCompletion()}%` }}
+                            title={`Profile is ${calculateProfileCompletion()}% complete`}
                           ></div>
                         </div>
-                        <span className="text-blue-400 font-semibold">{calculateProfileCompletion()}%</span>
                       </div>
+                      {calculateProfileCompletion() < 100 && (
+                        <p className="text-gray-500 text-xs mt-2">
+                          Complete your profile to improve your job matches
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

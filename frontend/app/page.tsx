@@ -18,14 +18,40 @@ export default function Home() {
 
   useEffect(() => {
     // Check auth status
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-    setIsAuthenticated(!!token && !!email)
-    
-    // Try to get user type from token or fetch it
-    if (token && email) {
-      // For now, we'll check on navigation
+    const checkAuth = () => {
+      const token = localStorage.getItem('access_token')
+      const email = localStorage.getItem('user_email')
+      const storedUserType = localStorage.getItem('user_type')
+      
+      setIsAuthenticated(!!token && !!email)
+      if (storedUserType) {
+        setUserType(storedUserType)
+      }
+      
+      // Try to get user type if authenticated but not stored
+      if (token && email && !storedUserType) {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        axios.get(`${apiUrl}/api/auth/me`, {
+          params: { email },
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(response => {
+          const userType = response.data.user_type
+          setUserType(userType)
+          localStorage.setItem('user_type', userType)
+        }).catch(() => {
+          // If auth fails, clear auth state
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('user_email')
+          localStorage.removeItem('user_type')
+          setIsAuthenticated(false)
+        })
+      }
     }
+    
+    checkAuth()
+    // Listen for storage changes (logout from other tabs)
+    window.addEventListener('storage', checkAuth)
+    return () => window.removeEventListener('storage', checkAuth)
   }, [])
 
   useEffect(() => {
@@ -66,17 +92,53 @@ export default function Home() {
               <Link href="/#business" className="hover:text-blue-400 transition-colors">Business</Link>
               <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
               <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
-              <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
-              <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
+              <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
+              {isAuthenticated ? (
+                <>
+                  <Link 
+                    href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'} 
+                    className="hover:text-blue-400 transition-colors"
+                  >
+                    Dashboard
+                  </Link>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('access_token')
+                      localStorage.removeItem('user_email')
+                      localStorage.removeItem('user_type')
+                      setIsAuthenticated(false)
+                      setUserType(null)
+                      router.push('/')
+                    }}
+                    className="hover:text-blue-400 transition-colors"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
+                  <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
+                </>
+              )}
             </nav>
 
             {/* CTA Button */}
-            <Link
-              href="/register"
-              className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
-            >
-              Free Trial
-            </Link>
+            {isAuthenticated ? (
+              <Link
+                href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'}
+                className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+              >
+                Go to Dashboard
+              </Link>
+            ) : (
+              <Link
+                href="/register"
+                className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+              >
+                Free Trial
+              </Link>
+            )}
           </div>
 
           {/* Tabs */}

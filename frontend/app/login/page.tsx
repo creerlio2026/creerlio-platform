@@ -41,6 +41,11 @@ export default function LoginPage() {
         // Get user_type from response (if available) or fetch user info
         const userType = response.data.user?.user_type
         
+        // Store user type in localStorage for quick access
+        if (response.data.user?.user_type) {
+          localStorage.setItem('user_type', response.data.user.user_type)
+        }
+        
         if (userType) {
           // Redirect to appropriate dashboard based on user type
           if (userType === 'business') {
