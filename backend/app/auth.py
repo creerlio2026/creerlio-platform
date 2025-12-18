@@ -145,16 +145,27 @@ def create_user(db: Session, user_data: UserRegister) -> User:
 
 
 def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-    """Authenticate a user with email and password"""
+    """Authenticate a user with email and password (bypass mode: allows empty password)"""
     user = get_user_by_email(db, email)
     if not user:
         return None
     
-    # Verify password (password truncation to 72 bytes is handled in verify_password)
-    if not user.hashed_password or not verify_password(password, user.hashed_password):
+    if not user.is_active:
         return None
     
-    if not user.is_active:
+    # BYPASS MODE: If password is empty/None, allow login without verification
+    if not password or password.strip() == "":
+        # Update last login
+        user.last_login = datetime.utcnow()
+        db.commit()
+        return user
+    
+    # If password provided, verify it (only if user has a hashed password)
+    if user.hashed_password:
+        if not verify_password(password, user.hashed_password):
+            return None
+    # If user has no hashed password but provided password, reject (security)
+    elif password:
         return None
     
     # Update last login
