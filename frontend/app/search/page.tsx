@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import SearchMap from '@/components/SearchMap'
 
 interface Job {
   id: number
@@ -22,6 +23,8 @@ interface Talent {
   bio: string | null
   skills: string[] | null
   location: string | null
+  latitude?: number | null
+  longitude?: number | null
 }
 
 interface Business {
@@ -30,6 +33,17 @@ interface Business {
   description: string | null
   industry: string | null
   location: string | null
+  latitude?: number | null
+  longitude?: number | null
+}
+
+interface MapMarker {
+  id: number
+  lat: number
+  lng: number
+  title: string
+  description?: string
+  type: 'talent' | 'business'
 }
 
 export default function SearchPage() {
@@ -48,6 +62,8 @@ export default function SearchPage() {
     businesses?: Business[]
   }>({})
   const [error, setError] = useState<string | null>(null)
+  const [mapMarkers, setMapMarkers] = useState<MapMarker[]>([])
+  const [isGeocoding, setIsGeocoding] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('access_token')
@@ -59,6 +75,113 @@ export default function SearchPage() {
       setUserType(storedUserType)
     }
   }, [])
+
+  // Geocode location string to coordinates using Mapbox Geocoding API
+  const geocodeLocation = async (location: string): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiY3JlZXJsaW8iLCJhIjoiY21pY3IxZHljMXFwNTJzb2FydzR4b3F1YSJ9.Is8-GyfEdqwKKEo2cGO65g'
+      const response = await axios.get(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json`,
+        {
+          params: {
+            access_token: MAPBOX_TOKEN,
+            limit: 1
+          }
+        }
+      )
+      
+      if (response.data.features && response.data.features.length > 0) {
+        const [lng, lat] = response.data.features[0].center
+        return { lat, lng }
+      }
+      return null
+    } catch (err) {
+      console.error('Geocoding error:', err)
+      return null
+    }
+  }
+
+  // Process search results and create map markers
+  useEffect(() => {
+    const processMarkers = async () => {
+      if (searchType === 'jobs' || Object.keys(searchResults).length === 0) {
+        setMapMarkers([])
+        return
+      }
+
+      setIsGeocoding(true)
+      const markers: MapMarker[] = []
+
+      // Process Talent results
+      if (searchResults.talent && searchResults.talent.length > 0) {
+        for (const talent of searchResults.talent) {
+          let lat: number | null = null
+          let lng: number | null = null
+
+          // Use existing coordinates if available
+          if (talent.latitude && talent.longitude) {
+            lat = talent.latitude
+            lng = talent.longitude
+          } else if (talent.location) {
+            // Geocode location string
+            const coords = await geocodeLocation(talent.location)
+            if (coords) {
+              lat = coords.lat
+              lng = coords.lng
+            }
+          }
+
+          if (lat !== null && lng !== null) {
+            markers.push({
+              id: talent.id,
+              lat,
+              lng,
+              title: talent.name,
+              description: talent.title || undefined,
+              type: 'talent'
+            })
+          }
+        }
+      }
+
+      // Process Business results
+      if (searchResults.businesses && searchResults.businesses.length > 0) {
+        for (const business of searchResults.businesses) {
+          let lat: number | null = null
+          let lng: number | null = null
+
+          // Use existing coordinates if available
+          if (business.latitude && business.longitude) {
+            lat = business.latitude
+            lng = business.longitude
+          } else if (business.location) {
+            // Geocode location string
+            const coords = await geocodeLocation(business.location)
+            if (coords) {
+              lat = coords.lat
+              lng = coords.lng
+            }
+          }
+
+          if (lat !== null && lng !== null) {
+            markers.push({
+              id: business.id,
+              lat,
+              lng,
+              title: business.name,
+              description: business.industry || undefined,
+              type: 'business'
+            })
+          }
+        }
+      }
+
+      setMapMarkers(markers)
+      setIsGeocoding(false)
+    }
+
+    processMarkers()
+  }, [searchResults, searchType])
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -286,6 +409,25 @@ export default function SearchPage() {
           {/* Search Results */}
           {Object.keys(searchResults).length > 0 && (
             <div className="space-y-6">
+              {/* Map Display for Talent and Business Results */}
+              {(searchResults.talent || searchResults.businesses) && mapMarkers.length > 0 && (
+                <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6">
+                  <h2 className="text-2xl font-bold mb-4">Map View</h2>
+                  <div className="h-[500px] w-full rounded-lg overflow-hidden">
+                    {isGeocoding ? (
+                      <div className="h-full flex items-center justify-center bg-slate-800/50">
+                        <div className="text-center">
+                          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                          <p className="text-slate-300">Geocoding locations...</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <SearchMap markers={mapMarkers} />
+                    )}
+                  </div>
+                </div>
+              )}
+
               {searchResults.jobs && searchResults.jobs.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Jobs ({searchResults.jobs.length})</h2>
@@ -317,6 +459,11 @@ export default function SearchPage() {
               {searchResults.talent && searchResults.talent.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Talent ({searchResults.talent.length})</h2>
+                  {mapMarkers.length === 0 && searchResults.talent.some(t => t.location) && (
+                    <p className="text-slate-400 text-sm mb-4">
+                      Note: Some talent profiles may not have location data available for mapping.
+                    </p>
+                  )}
                   <div className="grid md:grid-cols-2 gap-4">
                     {searchResults.talent.map((talent) => (
                       <div
@@ -351,6 +498,11 @@ export default function SearchPage() {
               {searchResults.businesses && searchResults.businesses.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Businesses ({searchResults.businesses.length})</h2>
+                  {mapMarkers.length === 0 && searchResults.businesses.some(b => b.location) && (
+                    <p className="text-slate-400 text-sm mb-4">
+                      Note: Some businesses may not have location data available for mapping.
+                    </p>
+                  )}
                   <div className="grid md:grid-cols-2 gap-4">
                     {searchResults.businesses.map((business) => (
                       <div
