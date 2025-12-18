@@ -7,6 +7,7 @@ import json
 import time
 import os
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Body
+from pydantic import ValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -198,13 +199,30 @@ async def register(request: Request, db=Depends(get_db)):
         except:
             pass
         # #endregion
-        user_data = UserRegister(
-            email=body.get("email"),
-            username=body.get("username"),
-            password=password,  # Required - already validated above
-            full_name=body.get("full_name"),
-            user_type=body.get("user_type", "talent")
-        )
+        try:
+            user_data = UserRegister(
+                email=body.get("email"),
+                username=body.get("username"),
+                password=password,  # Required - already validated above
+                full_name=body.get("full_name"),
+                user_type=body.get("user_type", "talent")
+            )
+        except ValidationError as ve:
+            # #region agent log
+            try:
+                with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"main.py:207","message":"UserRegister ValidationError","data":{"errors":ve.errors(),"password_provided":bool(password),"password_value":password},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+            except:
+                pass
+            # #endregion
+            # Format Pydantic validation errors
+            error_messages = []
+            for error in ve.errors():
+                field = ".".join(str(loc) for loc in error.get("loc", []))
+                msg = error.get("msg", "Validation error")
+                error_messages.append(f"{field}: {msg}")
+            raise HTTPException(status_code=422, detail=", ".join(error_messages))
+        
         user = create_user(db, user_data)
         return UserResponse(
             id=user.id,
@@ -215,6 +233,8 @@ async def register(request: Request, db=Depends(get_db)):
             is_active=user.is_active,
             created_at=user.created_at
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -258,11 +278,26 @@ async def login(body: dict = Body(...), db=Depends(get_db)):
             email=body.get("email"),
             password=password  # Required - already validated above
         )
+    except ValidationError as ve:
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                f.write(json.dumps({"location":"main.py:257","message":"UserLogin ValidationError","data":{"errors":ve.errors(),"password_provided":bool(password),"password_value":password,"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+        except:
+            pass
+        # #endregion
+        # Format Pydantic validation errors
+        error_messages = []
+        for error in ve.errors():
+            field = ".".join(str(loc) for loc in error.get("loc", []))
+            msg = error.get("msg", "Validation error")
+            error_messages.append(f"{field}: {msg}")
+        raise HTTPException(status_code=422, detail=", ".join(error_messages))
     except Exception as e:
         # #region agent log
         try:
             with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                f.write(json.dumps({"location":"main.py:235","message":"UserLogin model creation failed","data":{"error":str(e),"error_type":type(e).__name__,"email":body.get("email") if body else None,"has_password":bool(body.get("password")) if body else False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                f.write(json.dumps({"location":"main.py:269","message":"UserLogin model creation failed","data":{"error":str(e),"error_type":type(e).__name__,"email":body.get("email") if body else None,"has_password":bool(password) if password else False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
         except:
             pass
         # #endregion
