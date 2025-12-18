@@ -354,7 +354,7 @@ export default function SearchPage() {
           {/* Hero Section */}
           <div className="text-center space-y-6">
             <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-              Search <span className="text-blue-400">Talent & Jobs</span>
+              Search <span className="text-blue-400">Talent, Businesses or Jobs</span>
             </h1>
             <p className="text-xl text-slate-300 max-w-3xl mx-auto">
               Find the perfect match with AI-powered search

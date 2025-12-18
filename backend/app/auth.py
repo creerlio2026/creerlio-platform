@@ -68,26 +68,47 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash
     
     Note: bcrypt has a 72-byte limit. Passwords longer than 72 bytes will be truncated.
+    This ensures verification matches how the password was hashed.
     """
+    if not plain_password:
+        return False
+    
     # Truncate password to 72 bytes to match how it was hashed
     password_bytes = plain_password.encode('utf-8')
     if len(password_bytes) > 72:
         password_bytes = password_bytes[:72]
-        plain_password = password_bytes.decode('utf-8', errors='ignore')
+        # Decode back to string, handling any incomplete UTF-8 sequences
+        try:
+            plain_password = password_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            # If decoding fails, remove the last byte and try again
+            password_bytes = password_bytes[:71]
+            plain_password = password_bytes.decode('utf-8', errors='ignore')
+    
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
     """Hash a password
     
-    Note: bcrypt has a 72-byte limit. Passwords should be truncated before calling this function.
-    This function includes a safety truncation as well.
+    Note: bcrypt has a 72-byte limit. Passwords longer than 72 bytes will be truncated.
+    This function ensures passwords are truncated to exactly 72 bytes before hashing.
     """
-    # Safety truncation (should already be truncated in UserRegister model)
+    if not password:
+        return ""
+    
+    # Truncate password to 72 bytes to comply with bcrypt limit
     password_bytes = password.encode('utf-8')
     if len(password_bytes) > 72:
         password_bytes = password_bytes[:72]
-        password = password_bytes.decode('utf-8', errors='ignore')
+        # Decode back to string, handling any incomplete UTF-8 sequences
+        try:
+            password = password_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            # If decoding fails, remove the last byte and try again
+            password_bytes = password_bytes[:71]
+            password = password_bytes.decode('utf-8', errors='ignore')
+    
     return pwd_context.hash(password)
 
 
