@@ -264,23 +264,10 @@ export default function Home() {
           )}
         </div>
 
-        {/* RIGHT VISUAL - Stats and Map aligned right */}
+        {/* RIGHT VISUAL - Map aligned right */}
         <div className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6">
-
-          {/* STATS - Aligned right */}
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="rounded-xl bg-slate-800/70 p-5 text-right">
-              <div className="text-green-400 text-3xl font-bold">84.38%</div>
-              <div className="text-slate-400 text-sm">Match Accuracy</div>
-            </div>
-            <div className="rounded-xl bg-slate-800/70 p-5 text-right">
-              <div className="text-blue-400 text-3xl font-bold">655K</div>
-              <div className="text-slate-400 text-sm">Active Talent</div>
-            </div>
-          </div>
-
           {/* MAP - Centered on user location */}
-          <div className="relative h-[420px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
+          <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
             {location ? (
               <MapboxMap center={location} zoom={10} />
             ) : (
