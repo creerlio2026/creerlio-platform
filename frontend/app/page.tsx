@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import axios from 'axios';
 
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ssr: false,

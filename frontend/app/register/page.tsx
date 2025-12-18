@@ -73,8 +73,21 @@ export default function RegisterPage() {
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'register/page.tsx:71',message:'API URL resolved',data:{apiUrl,envVar:process.env.NEXT_PUBLIC_API_URL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
       
-      // Health check disabled - CORS bypassed, proceed directly to registration
-      // Backend will be checked when we actually make the registration request
+      // Test backend connectivity before registration
+      try {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'register/page.tsx:76',message:'Testing backend health check',data:{apiUrl:`${apiUrl}/health`},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+        await axios.get(`${apiUrl}/health`, { timeout: 3000 })
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'register/page.tsx:79',message:'Backend health check succeeded',data:{apiUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+      } catch (healthError: any) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'register/page.tsx:82',message:'Backend health check failed',data:{apiUrl,error:healthError.message,code:healthError.code,isNetworkError:!healthError.response},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+        throw new Error('Backend is not running. Please start the backend server.')
+      }
       
       // Prepare request body with explicit password field
       // BYPASS MODE: Password is optional - allow empty passwords

@@ -46,6 +46,8 @@ export default function BusinessDashboard() {
   const [user, setUser] = useState<User | null>(null)
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
+  const [applications, setApplications] = useState<Applicant[]>([])
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -123,7 +125,7 @@ export default function BusinessDashboard() {
     }
   }
 
-  const fetchJobApplicants = async (jobId: number, email: string) => {
+  const fetchJobApplications = async (jobId: number, email: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       const response = await axios.get(`${apiUrl}/api/applications/job/${jobId}`, {
@@ -133,11 +135,11 @@ export default function BusinessDashboard() {
         }
       })
       if (response.data && Array.isArray(response.data.applications)) {
-        setApplicants(response.data.applications)
+        setApplications(response.data.applications)
       }
     } catch (error) {
-      console.error('Error fetching applicants:', error)
-      setApplicants([])
+      console.error('Error fetching applications:', error)
+      setApplications([])
     }
   }
 
@@ -147,10 +149,10 @@ export default function BusinessDashboard() {
       if (selectedJobId === jobId) {
         // Deselect if clicking the same job
         setSelectedJobId(null)
-        setApplicants([])
+        setApplications([])
       } else {
         setSelectedJobId(jobId)
-        fetchJobApplicants(jobId, email)
+        fetchJobApplications(jobId, email)
       }
     }
   }
@@ -246,7 +248,7 @@ export default function BusinessDashboard() {
                       <tr 
                         key={job.id} 
                         className={`border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer ${
-                          selectedJobId === job.id ? 'bg-blue-500/10' : ''
+                          null === job.id ? 'bg-blue-500/10' : ''
                         }`}
                         onClick={() => handleJobClick(job.id)}
                       >
@@ -270,14 +272,14 @@ export default function BusinessDashboard() {
                 </table>
               </div>
               
-              {/* Applicants Panel */}
+              {/* Applications Panel */}
               <div className="dashboard-card rounded-xl p-6">
                 <h3 className="text-xl font-bold text-white mb-4">
-                  {selectedJobId ? 'Applicants' : 'Select a job to view applicants'}
+                  {selectedJobId ? `Applications for Job #${selectedJobId}` : 'Select a job to view applications'}
                 </h3>
-                {selectedJobId && applicants.length > 0 ? (
+                {selectedJobId && applications.length > 0 ? (
                   <div className="space-y-3">
-                    {applicants.map((applicant) => (
+                    {applications.map((applicant) => (
                       <div key={applicant.id} className="border border-gray-800 rounded-lg p-4">
                         <div className="flex items-start justify-between mb-2">
                           <div>
@@ -306,7 +308,7 @@ export default function BusinessDashboard() {
                     ))}
                   </div>
                 ) : selectedJobId ? (
-                  <p className="text-gray-400">No applicants yet</p>
+                  <p className="text-gray-400">No applications yet</p>
                 ) : null}
               </div>
             </div>
