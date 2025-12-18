@@ -6,92 +6,14 @@
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 10, 15, 30;
   --background-end-rgb: 5, 10, 20;
-  --accent-blue: 59, 130, 246;
-  --accent-blue-glow: 96, 165, 250;
 }
 
 body {
+  min-height: 100vh;
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(
-      to bottom,
-      rgb(var(--background-start-rgb)),
-      rgb(var(--background-end-rgb))
-    );
-  min-height: 100vh;
+    to bottom,
+    rgb(var(--background-start-rgb)),
+    rgb(var(--background-end-rgb))
+  );
 }
-
-/* Glowing effects */
-.glow-blue {
-  box-shadow: 0 0 20px rgba(var(--accent-blue), 0.5),
-              0 0 40px rgba(var(--accent-blue), 0.3);
-}
-
-.glow-text {
-  text-shadow: 0 0 10px rgba(var(--accent-blue-glow), 0.8),
-               0 0 20px rgba(var(--accent-blue-glow), 0.5);
-}
-
-/* Network visualization animation */
-@keyframes pulse-glow {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.network-node {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-/* Dashboard card styles */
-.dashboard-card {
-  background: rgba(15, 23, 42, 0.8);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(var(--accent-blue), 0.2);
-}
-
-/* Slow spin animation */
-@keyframes spin-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.animate-spin-slow {
-  animation: spin-slow 3s linear infinite;
-}
-
-/* Animated blob background */
-@keyframes blob {
-  0% {
-    transform: translate(0px, 0px) scale(1);
-  }
-  33% {
-    transform: translate(30px, -50px) scale(1.1);
-  }
-  66% {
-    transform: translate(-20px, 20px) scale(0.9);
-  }
-  100% {
-    transform: translate(0px, 0px) scale(1);
-  }
-}
-
-.animate-blob {
-  animation: blob 7s infinite;
-}
-
-.animation-delay-2000 {
-  animation-delay: 2s;
-}
-
-.animation-delay-4000 {
-  animation-delay: 4s;
-}
-
-
