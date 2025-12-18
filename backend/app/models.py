@@ -3,7 +3,7 @@ Data Models for Creerlio Platform
 SQLAlchemy models for business profiles, talent profiles, and resume data
 """
 
-from sqlalchemy import Column, Integer, String, Float, Text, JSON, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, JSON, DateTime, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -234,6 +234,38 @@ class Job(Base):
     business_profile = relationship("BusinessProfile", backref="jobs")
 
 
+class Application(Base):
+    """Job application model"""
+    __tablename__ = "applications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    talent_profile_id = Column(Integer, ForeignKey("talent_profiles.id"), nullable=False, index=True)
+    
+    # Application status
+    status = Column(String(50), default="applied")  # "applied", "shortlisted", "rejected", "hired"
+    
+    # Application details
+    cover_letter = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    
+    # Metadata
+    extra_metadata = Column(JSON)  # Additional flexible data
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    job = relationship("Job", backref="applications")
+    talent_profile = relationship("TalentProfile", backref="applications")
+    
+    # Unique constraint: one application per job per talent
+    __table_args__ = (
+        UniqueConstraint('job_id', 'talent_profile_id', name='_job_talent_uc'),
+    )
+
+
 # ==================== Pydantic Models (for API) ====================
 
 class BusinessProfileCreate(BaseModel):
@@ -388,6 +420,27 @@ class JobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     published_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
+
+class ApplicationCreate(BaseModel):
+    job_id: int
+    cover_letter: Optional[str] = None
+    notes: Optional[str] = None
+    extra_metadata: Optional[Dict] = None
+
+
+class ApplicationResponse(BaseModel):
+    id: int
+    job_id: int
+    talent_profile_id: int
+    status: str
+    cover_letter: Optional[str]
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
     
     class Config:
         from_attributes = True
