@@ -28,15 +28,15 @@ export default function BusinessDashboard() {
             <span className="text-white text-2xl font-bold">Creerlio</span>
           </Link>
           <div className="flex items-center gap-2">
-            <span className="text-white text-sm">Connect With Us:</span>
+            <span className="text-gray-300 text-sm">Connect With Us:</span>
             <div className="flex gap-2">
-              <a href="#" className="w-8 h-8 rounded-full border border-gray-400 flex items-center justify-center text-white hover:bg-gray-800">
+              <a href="#" className="w-8 h-8 rounded-full border border-gray-600 flex items-center justify-center text-gray-300 hover:bg-gray-800 hover:text-blue-400 transition-colors">
                 <span className="text-xs font-bold">in</span>
               </a>
-              <a href="#" className="w-8 h-8 rounded-full border border-gray-400 flex items-center justify-center text-white hover:bg-gray-800">
+              <a href="#" className="w-8 h-8 rounded-full border border-gray-600 flex items-center justify-center text-gray-300 hover:bg-gray-800 hover:text-blue-400 transition-colors">
                 <span className="text-xs font-bold">f</span>
               </a>
-              <a href="#" className="w-8 h-8 rounded-full border border-gray-400 flex items-center justify-center text-white hover:bg-gray-800">
+              <a href="#" className="w-8 h-8 rounded-full border border-gray-600 flex items-center justify-center text-gray-300 hover:bg-gray-800 hover:text-blue-400 transition-colors">
                 <span className="text-xs">🐦</span>
               </a>
             </div>
