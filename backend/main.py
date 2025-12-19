@@ -199,9 +199,30 @@ async def add_cors_header(request: Request, call_next):
 @app.post("/api/auth/register", response_model=UserResponse)
 async def register(request: Request, db=Depends(get_db)):
     """Register a new user - Password completely removed during construction"""
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            f.write(json.dumps({"location":"main.py:199","message":"Register endpoint entry","data":{"method":"POST","path":"/api/auth/register"},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+    except:
+        pass
+    # #endregion
     try:
         body = await request.json()
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                f.write(json.dumps({"location":"main.py:203","message":"Request body parsed","data":{"body_keys":list(body.keys()) if body else None,"has_password":"password" in body if body else False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+        except:
+            pass
+        # #endregion
     except Exception as e:
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                f.write(json.dumps({"location":"main.py:205","message":"JSON parse error","data":{"error":str(e)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+        except:
+            pass
+        # #endregion
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
     
     # Password field completely removed - create clean dict without password
@@ -217,6 +238,13 @@ async def register(request: Request, db=Depends(get_db)):
         clean_body["user_type"] = body["user_type"]
     else:
         clean_body["user_type"] = "talent"
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            f.write(json.dumps({"location":"main.py:220","message":"Clean body created","data":{"clean_body_keys":list(clean_body.keys()),"has_password_in_clean":"password" in clean_body},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+    except:
+        pass
+    # #endregion
     body = clean_body
     # #region agent log
     try:
@@ -679,6 +707,13 @@ async def get_public_jobs(
     db=Depends(get_db)
 ):
     """Get published jobs (public endpoint)"""
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            f.write(json.dumps({"location":"main.py:673","message":"get_public_jobs endpoint called","data":{"location":location,"keyword":keyword,"skip":skip,"limit":limit},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except:
+        pass
+    # #endregion
     query = db.query(Job).filter(
         Job.status == "published",
         Job.is_active == True
