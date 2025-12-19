@@ -38,25 +38,17 @@ export default function EditBusinessProfilePage() {
   })
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-
-    if (!token || !email) {
-      router.push('/login')
-      return
-    }
-
-    fetchProfile(email)
-  }, [router])
+    // Authentication removed - allow direct access for manual profile building
+    const defaultEmail = 'business@creerlio.local'
+    fetchProfile(defaultEmail)
+  }, [])
 
   const fetchProfile = async (email: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      // Authentication removed - fetch without token for manual profile building
       const response = await axios.get(`${apiUrl}/api/business/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
+        params: { email }
       })
       
       if (response.data) {

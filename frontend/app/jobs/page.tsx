@@ -174,14 +174,12 @@ export default function JobsPage() {
             <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
               <Link href="/" className="hover:text-blue-400 transition-colors">Home</Link>
               <Link href="/jobs" className="hover:text-blue-400 transition-colors text-blue-400">Jobs</Link>
-              <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
-              <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
             </nav>
             <Link
-              href="/register"
+              href="/dashboard/business"
               className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
             >
-              Free Trial
+              Business Dashboard
             </Link>
           </div>
         </div>
@@ -285,10 +283,10 @@ export default function JobsPage() {
                       </button>
                     ) : (
                       <Link
-                        href="/login"
+                        href="/dashboard/talent"
                         className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-center"
                       >
-                        Login to Apply
+                        Apply Now
                       </Link>
                     )}
                   </div>

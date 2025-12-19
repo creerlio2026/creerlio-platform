@@ -117,52 +117,24 @@ export default function Home() {
               <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
               <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
               <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
-              {isAuthenticated ? (
-                <>
-                  <Link 
-                    href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'} 
-                    className="hover:text-blue-400 transition-colors"
-                  >
-                    Dashboard
-                  </Link>
-                  <button
-                    onClick={() => {
-                      localStorage.removeItem('access_token')
-                      localStorage.removeItem('user_email')
-                      localStorage.removeItem('user_type')
-                      setIsAuthenticated(false)
-                      setUserType(null)
-                      router.push('/')
-                    }}
-                    className="hover:text-blue-400 transition-colors"
-                  >
-                    Logout
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
-                  <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
-                </>
-              )}
+              {/* Login/Register removed - direct access to dashboards */}
             </nav>
 
-            {/* CTA Button */}
-            {isAuthenticated ? (
+            {/* CTA Buttons - Direct access to dashboards */}
+            <div className="flex gap-3">
               <Link
-                href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'}
+                href="/dashboard/talent"
                 className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
               >
-                Go to Dashboard
+                Talent Dashboard
               </Link>
-            ) : (
               <Link
-                href="/register"
-                className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                href="/dashboard/business"
+                className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
               >
-                Free Trial
+                Business Dashboard
               </Link>
-            )}
+            </div>
           </div>
         </div>
       </header>
@@ -378,7 +350,7 @@ export default function Home() {
               </p>
               <div className="flex gap-4">
                 <Link
-                  href="/register"
+                  href="/dashboard/business"
                   className="px-6 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 font-semibold"
                 >
                   Get Started

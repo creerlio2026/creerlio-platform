@@ -23,20 +23,14 @@ export default function TalentDashboard() {
   const [talentProfile, setTalentProfile] = useState<any>(null)
   const [applications, setApplications] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('overview')
+  const [userType, setUserType] = useState<string>('talent')
 
   useEffect(() => {
-    // Check if user is logged in
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-
-    if (!token || !email) {
-      router.push('/login')
-      return
-    }
-
-    // Fetch user info
-    fetchUserInfo(email)
-  }, [router])
+    // Authentication removed - allow direct access
+    // Use default email for manual profile building
+    const defaultEmail = 'talent@creerlio.local'
+    fetchUserInfo(defaultEmail)
+  }, [])
 
   const fetchUserInfo = async (email: string) => {
     try {
@@ -47,16 +41,15 @@ export default function TalentDashboard() {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:40',message:'Attempting fetch user info',data:{url:`${apiUrl}/api/auth/me`,hasToken:!!localStorage.getItem('access_token')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
+      // Authentication removed - fetch without token
       const response = await axios.get(`${apiUrl}/api/auth/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
+        params: { email }
       })
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:46',message:'Fetch user info succeeded',data:{status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       setUser(response.data)
+      setUserType(response.data.user_type)
       
       // Fetch talent profile (by user email)
       fetchTalentProfileByEmail(email)
@@ -67,10 +60,18 @@ export default function TalentDashboard() {
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:52',message:'Fetch user info failed',data:{hasResponse:!!error.response,status:error.response?.status,code:error.code,message:error.message,isNetworkError:!error.response},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
       console.error('Error fetching user:', error)
-      // If auth fails, redirect to login
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('user_email')
-      router.push('/login')
+      // User doesn't exist yet - create default user data for manual building
+      if (error.response?.status === 404) {
+        setUser({
+          id: 0,
+          email: email,
+          username: 'talent_user',
+          full_name: 'John Talent',
+          user_type: 'talent',
+          is_active: true
+        })
+        setUserType('talent')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -79,11 +80,9 @@ export default function TalentDashboard() {
   const fetchTalentProfileByEmail = async (email: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      // Authentication removed - fetch without token
       const response = await axios.get(`${apiUrl}/api/talent/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
+        params: { email }
       })
       if (response.data) {
         setTalentProfile(response.data)
@@ -96,11 +95,9 @@ export default function TalentDashboard() {
   const fetchApplications = async (email: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+      // Authentication removed - fetch without token
       const response = await axios.get(`${apiUrl}/api/applications/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
+        params: { email }
       })
       if (response.data && Array.isArray(response.data.applications)) {
         setApplications(response.data.applications)
@@ -129,9 +126,7 @@ export default function TalentDashboard() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('user_email')
-    localStorage.removeItem('user_type')
+    // Logout removed - just navigate home
     router.push('/')
   }
 

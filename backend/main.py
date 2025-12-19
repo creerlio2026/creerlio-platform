@@ -379,7 +379,7 @@ async def login(request: Request, db=Depends(get_db)):
         # #endregion
         raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
     
-    user = authenticate_user(db, credentials.email, credentials.password)
+    user = authenticate_user(db, credentials.email)
     if not user:
         raise HTTPException(
             status_code=401,
@@ -408,9 +408,9 @@ async def login(request: Request, db=Depends(get_db)):
     }
 
 
-@app.get("/api/auth/me", response_model=UserResponse)
+@app.get("/api/auth/me")
 async def get_current_user(email: Optional[str] = None, db=Depends(get_db)):
-    """Get current user information"""
+    """Get current user information - Authentication removed for manual profile building"""
     if not email:
         raise HTTPException(status_code=400, detail="Email required")
     
@@ -418,15 +418,16 @@ async def get_current_user(email: Optional[str] = None, db=Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        username=user.username,
-        full_name=user.full_name,
-        user_type=user.user_type,
-        is_active=user.is_active,
-        created_at=user.created_at
-    )
+    # Return dict manually to avoid validation issues
+    return {
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "full_name": user.full_name,
+        "user_type": user.user_type,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat() if user.created_at else None
+    }
 
 
 # ==================== AI Resume Parsing ====================
@@ -747,6 +748,107 @@ async def get_public_jobs(
         pass
     # #endregion
     return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.post("/api/init-profiles")
+async def init_profiles_endpoint(db=Depends(get_db)):
+    """Initialize 1 Talent and 1 Business profile for manual development"""
+    try:
+        from app.models import TalentProfile, BusinessProfile
+        from app.auth import create_user, get_user_by_email
+        from app.auth import UserRegister
+        
+        results = {"talent": None, "business": None}
+        
+        # Create Talent User
+        talent_email = "talent@creerlio.local"
+        talent_user = get_user_by_email(db, talent_email)
+        if not talent_user:
+            talent_user_data = UserRegister(
+                email=talent_email,
+                username="talent_user",
+                full_name="John Talent",
+                user_type="talent"
+            )
+            talent_user = create_user(db, talent_user_data)
+            results["talent"] = {"user_created": True, "email": talent_email}
+        else:
+            results["talent"] = {"user_created": False, "email": talent_email, "message": "User already exists"}
+        
+        # Create Talent Profile
+        talent_profile = db.query(TalentProfile).filter(TalentProfile.email == talent_email).first()
+        if not talent_profile:
+            talent_profile = TalentProfile(
+                name="John Talent",
+                email=talent_email,
+                title="Software Developer",
+                bio="Experienced software developer looking for opportunities",
+                skills=["Python", "JavaScript", "React", "Node.js"],
+                experience_years=5,
+                city="Sydney",
+                country="Australia",
+                is_active=True
+            )
+            db.add(talent_profile)
+            db.commit()
+            db.refresh(talent_profile)
+            
+            # Link talent profile to user
+            talent_user.talent_profile_id = talent_profile.id
+            db.commit()
+            results["talent"]["profile_created"] = True
+            results["talent"]["profile_id"] = talent_profile.id
+        else:
+            results["talent"]["profile_created"] = False
+            results["talent"]["profile_id"] = talent_profile.id
+            results["talent"]["message"] = "Profile already exists"
+        
+        # Create Business User
+        business_email = "business@creerlio.local"
+        business_user = get_user_by_email(db, business_email)
+        if not business_user:
+            business_user_data = UserRegister(
+                email=business_email,
+                username="business_user",
+                full_name="Acme Corporation",
+                user_type="business"
+            )
+            business_user = create_user(db, business_user_data)
+            results["business"] = {"user_created": True, "email": business_email}
+        else:
+            results["business"] = {"user_created": False, "email": business_email, "message": "User already exists"}
+        
+        # Create Business Profile
+        business_profile = db.query(BusinessProfile).filter(BusinessProfile.email == business_email).first()
+        if not business_profile:
+            business_profile = BusinessProfile(
+                name="Acme Corporation",
+                email=business_email,
+                industry="Technology",
+                description="Leading technology company looking for top talent",
+                website="https://acme.example.com",
+                city="Sydney",
+                country="Australia",
+                is_active=True
+            )
+            db.add(business_profile)
+            db.commit()
+            db.refresh(business_profile)
+            
+            # Link business profile to user
+            business_user.business_profile_id = business_profile.id
+            db.commit()
+            results["business"]["profile_created"] = True
+            results["business"]["profile_id"] = business_profile.id
+        else:
+            results["business"]["profile_created"] = False
+            results["business"]["profile_id"] = business_profile.id
+            results["business"]["message"] = "Profile already exists"
+        
+        return {"success": True, "message": "Profiles initialized", "results": results}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error initializing profiles: {str(e)}")
 
 
 @app.get("/api/jobs/{job_id}")

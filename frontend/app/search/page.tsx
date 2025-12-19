@@ -322,12 +322,7 @@ export default function SearchPage() {
                     Logout
                   </button>
                 </>
-              ) : (
-                <>
-                  <Link href="/login" className="hover:text-blue-400 transition-colors">Login</Link>
-                  <Link href="/register" className="hover:text-blue-400 transition-colors">Register</Link>
-                </>
-              )}
+              ) : null}
             </nav>
 
             {isAuthenticated ? (
@@ -339,10 +334,10 @@ export default function SearchPage() {
               </Link>
             ) : (
               <Link
-                href="/register"
+                href="/dashboard/business"
                 className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
               >
-                Free Trial
+                Business Dashboard
               </Link>
             )}
           </div>
