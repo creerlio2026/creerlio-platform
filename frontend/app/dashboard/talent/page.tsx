@@ -189,6 +189,12 @@ export default function TalentDashboard() {
                 )}
               </button>
             ))}
+            <Link
+              href="/dashboard/talent/bank"
+              className="px-6 py-3 text-sm font-medium text-gray-300 hover:text-blue-400 transition-colors"
+            >
+              Talent Bank ↗
+            </Link>
           </div>
         </div>
 
@@ -224,6 +230,12 @@ export default function TalentDashboard() {
                     className="block px-4 py-3 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 transition-colors"
                   >
                     Upload Resume
+                  </Link>
+                  <Link
+                    href="/dashboard/talent/bank"
+                    className="block px-4 py-3 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 transition-colors"
+                  >
+                    Talent Bank
                   </Link>
                   <Link
                     href="/portfolio"

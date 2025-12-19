@@ -298,7 +298,11 @@ class TalentBankItem(Base):
     # - education: { "institution": "", "degree": "", "field": "", "startDate": "", "endDate": "" }
     # - credential: { "issuer": "", "name": "", "issuedDate": "", "expiryDate": "", "credentialId": "" }
     # - document: { "originalName": "", "tags": [], "notes": "" }
-    metadata = Column(JSON)
+    #
+    # NOTE: The attribute name 'metadata' is reserved by SQLAlchemy's Declarative API,
+    # so we use 'extra_metadata' as the Python attribute while the underlying column
+    # is still named 'metadata' in the database to match Supabase.
+    extra_metadata = Column("metadata", JSON)
 
     # Flags
     is_active = Column(Boolean, default=True, index=True)
