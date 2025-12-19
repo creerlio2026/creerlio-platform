@@ -311,6 +311,31 @@ export default function BusinessDashboard() {
           </div>
         </section>
 
+        {/* Privacy and Information Control Section */}
+        <section className="mb-12 border-t border-gray-800 pt-12">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div className="relative h-96 rounded-lg overflow-hidden">
+              <Image
+                src="/image-375d4a6b-a01d-4cfe-ae4f-a6fb06e8933a.png"
+                alt="Privacy and Information Control"
+                fill
+                className="object-cover"
+              />
+            </div>
+            <div>
+              <h2 className="text-4xl font-bold text-gray-300 mb-6">Maintain Control of your Privacy and Information</h2>
+              <div className="space-y-4 text-gray-400">
+                <div>
+                  <strong className="text-blue-400">Privacy of Information:</strong> No longer will you lose control of your information like you currently do when you apply for Jobs or send your Resume and documents for employment consideration. You choose what Business see when they see it and how long they see it for!
+                </div>
+                <div>
+                  <strong className="text-blue-400">Avoiding Unsolicited Offers:</strong> Controlling your information helps prevent your data from being sold or shared without your consent, leading to unsolicited job offers or marketing communications.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Seamless Integration Section */}
         <section className="mb-12 border-t border-gray-800 pt-12 relative overflow-hidden">
           <div className="absolute inset-0 opacity-20">
