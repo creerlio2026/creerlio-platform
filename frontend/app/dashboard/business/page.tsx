@@ -100,6 +100,8 @@ export default function BusinessDashboard() {
         
         <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
           <Link href="/about" className="hover:text-blue-400 transition-colors">About</Link>
+          <Link href="/dashboard/talent" className="hover:text-blue-400 transition-colors">Talent</Link>
+          <Link href="/dashboard/business" className="hover:text-blue-400 transition-colors">Business</Link>
           <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
           <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
           <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
@@ -182,9 +184,9 @@ export default function BusinessDashboard() {
                 </button>
               )}
               {!isMapExpanded && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors">
-                  <div className="text-white text-sm font-medium bg-blue-500/80 px-4 py-2 rounded-lg">
-                    Click to Expand
+                <div className="absolute bottom-4 right-4">
+                  <div className="px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
+                    Click to expand
                   </div>
                 </div>
               )}
