@@ -704,15 +704,6 @@ async def get_jobs(
     return {"jobs": jobs, "count": len(jobs)}
 
 
-@app.get("/api/jobs/{job_id}")
-async def get_job(job_id: int, db=Depends(get_db)):
-    """Get job by ID"""
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
-
-
 @app.get("/api/jobs/public")
 async def get_public_jobs(
     location: Optional[str] = None,
@@ -756,6 +747,15 @@ async def get_public_jobs(
         pass
     # #endregion
     return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job(job_id: int, db=Depends(get_db)):
+    """Get job by ID"""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 # ==================== Applications ====================
