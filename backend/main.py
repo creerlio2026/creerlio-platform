@@ -747,6 +747,13 @@ async def get_public_jobs(
         )
     
     jobs = query.offset(skip).limit(limit).all()
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            f.write(json.dumps({"location":"main.py:702","message":"get_public_jobs returning results","data":{"job_count":len(jobs)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except:
+        pass
+    # #endregion
     return {"jobs": jobs, "count": len(jobs)}
 
 
