@@ -1301,7 +1301,21 @@ async def list_talent_bank_items(
     items = query.order_by(TalentBankItem.created_at.desc()).all()
     return {
         "items": [
-            TalentBankItemResponse.from_orm(item)  # type: ignore[arg-type]
+            TalentBankItemResponse(
+                id=item.id,
+                user_id=item.user_id,
+                item_type=item.item_type,
+                title=item.title,
+                description=item.description,
+                file_url=item.file_url,
+                file_path=item.file_path,
+                file_type=item.file_type,
+                file_size=item.file_size,
+                metadata=getattr(item, "extra_metadata", None),
+                is_active=item.is_active,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+            )
             for item in items
         ],
         "count": len(items),
@@ -1329,13 +1343,27 @@ async def create_talent_bank_item(
             item_type=payload.item_type,
             title=payload.title,
             description=payload.description,
-            metadata=payload.metadata or {},
+            extra_metadata=payload.metadata or {},
             is_active=True,
         )
         db.add(item)
         db.commit()
         db.refresh(item)
-        return TalentBankItemResponse.from_orm(item)  # type: ignore[arg-type]
+        return TalentBankItemResponse(
+            id=item.id,
+            user_id=item.user_id,
+            item_type=item.item_type,
+            title=item.title,
+            description=item.description,
+            file_url=item.file_url,
+            file_path=item.file_path,
+            file_type=item.file_type,
+            file_size=item.file_size,
+            metadata=getattr(item, "extra_metadata", None),
+            is_active=item.is_active,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to create talent bank item: {str(e)}")
@@ -1414,16 +1442,51 @@ async def upload_talent_bank_files(
                 file_path=path,
                 file_type=content_type,
                 file_size=len(content),
-                metadata={"originalName": filename},
+                extra_metadata={"originalName": filename},
                 is_active=True,
             )
             db.add(item)
             db.commit()
             db.refresh(item)
-            created_items.append(TalentBankItemResponse.from_orm(item))  # type: ignore[arg-type]
+            created_items.append(
+                TalentBankItemResponse(
+                    id=item.id,
+                    user_id=item.user_id,
+                    item_type=item.item_type,
+                    title=item.title,
+                    description=item.description,
+                    file_url=item.file_url,
+                    file_path=item.file_path,
+                    file_type=item.file_type,
+                    file_size=item.file_size,
+                    metadata=getattr(item, "extra_metadata", None),
+                    is_active=item.is_active,
+                    created_at=item.created_at,
+                    updated_at=item.updated_at,
+                )
+            )
         except Exception as e:
             db.rollback()
-            # Continue processing remaining files but record the error
+            # #region agent log
+            try:
+                with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                    import json, time as _time
+                    f.write(json.dumps({
+                        "location": "main.py:talent_bank_upload_error",
+                        "message": "Talent Bank upload failed",
+                        "data": {
+                            "filename": getattr(file, "filename", None),
+                            "error": str(e),
+                            "error_type": type(e).__name__
+                        },
+                        "timestamp": int(_time.time() * 1000),
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "TB1"
+                    }) + "\n")
+            except:
+                pass
+            # #endregion
             raise HTTPException(status_code=500, detail=f"Failed to upload file '{file.filename}': {str(e)}")
 
     return {"items": created_items, "count": len(created_items)}
