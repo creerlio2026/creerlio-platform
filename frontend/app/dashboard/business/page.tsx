@@ -23,6 +23,7 @@ export default function BusinessDashboard() {
   const [email, setEmail] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [isMapExpanded, setIsMapExpanded] = useState(false)
 
   useEffect(() => {
     const token = localStorage.getItem('access_token')
@@ -160,8 +161,33 @@ export default function BusinessDashboard() {
               </ul>
               <h2 className="text-3xl font-bold text-white mt-8">Future Employment Relationships begin NOW!</h2>
             </div>
-            <div className="relative h-96 rounded-lg overflow-hidden">
+            <div 
+              className={`relative rounded-lg overflow-hidden cursor-pointer transition-all ${
+                isMapExpanded 
+                  ? 'fixed inset-0 z-50 h-screen w-screen' 
+                  : 'h-96'
+              }`}
+              onClick={() => !isMapExpanded && setIsMapExpanded(true)}
+            >
               <MapboxMap className="w-full h-full" />
+              {isMapExpanded && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsMapExpanded(false)
+                  }}
+                  className="absolute top-4 right-4 z-10 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-lg"
+                >
+                  Close
+                </button>
+              )}
+              {!isMapExpanded && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 hover:bg-black/30 transition-colors">
+                  <div className="text-white text-sm font-medium bg-blue-500/80 px-4 py-2 rounded-lg">
+                    Click to Expand
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>
