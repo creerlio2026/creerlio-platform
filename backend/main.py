@@ -196,7 +196,7 @@ async def add_cors_header(request: Request, call_next):
     response.headers["access-control-allow-headers"] = "*"
     return response
 
-@app.post("/api/auth/register", response_model=UserResponse)
+@app.post("/api/auth/register")
 async def register(request: Request, db=Depends(get_db)):
     """Register a new user - Password completely removed during construction"""
     # #region agent log
@@ -308,15 +308,16 @@ async def register(request: Request, db=Depends(get_db)):
             raise HTTPException(status_code=422, detail=", ".join(error_messages))
         
         user = create_user(db, user_data)
-        return UserResponse(
-            id=user.id,
-            email=user.email,
-            username=user.username,
-            full_name=user.full_name,
-            user_type=user.user_type,
-            is_active=user.is_active,
-            created_at=user.created_at
-        )
+        # Return dict manually to avoid validation issues
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "user_type": user.user_type,
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
     except HTTPException:
         raise
     except ValueError as e:
