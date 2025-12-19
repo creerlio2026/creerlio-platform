@@ -32,10 +32,26 @@ export default function LoginPage() {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/page.tsx:31',message:'Preparing login request',data:{has_email:!!formData.email,has_password:!!formData.password,password_length:formData.password?.length || 0,email:formData.email},"timestamp":Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
+      // Truncate password to 72 bytes if necessary (bcrypt limit)
+      let passwordToSend = formData.password || ""
+      if (passwordToSend) {
+        const passwordBytes = new TextEncoder().encode(passwordToSend)
+        if (passwordBytes.length > 72) {
+          // Truncate to 72 bytes
+          const truncatedBytes = passwordBytes.slice(0, 72)
+          // Handle UTF-8 boundary
+          let truncated = new TextDecoder('utf-8', { fatal: false }).decode(truncatedBytes)
+          if (!truncated || truncated.length === 0) {
+            truncated = new TextDecoder('utf-8', { fatal: false }).decode(passwordBytes.slice(0, 71))
+          }
+          passwordToSend = truncated
+        }
+      }
+      
       // BYPASS MODE: Always include password field (empty string if not provided)
       const response = await axios.post(`${apiUrl}/api/auth/login`, {
         email: formData.email,
-        password: formData.password || ""  // Include password (empty string if not provided - bypass mode)
+        password: passwordToSend  // Truncated password (max 72 bytes)
       })
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/page.tsx:36',message:'Login request succeeded',data:{status:response.status},"timestamp":Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});

@@ -54,6 +54,14 @@ export default function RegisterPage() {
     if (formData.password && formData.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters (if provided)'
     }
+    
+    // Check password byte length (bcrypt has 72-byte limit)
+    if (formData.password) {
+      const passwordBytes = new TextEncoder().encode(formData.password)
+      if (passwordBytes.length > 72) {
+        newErrors.password = 'Password is too long (maximum 72 bytes). It will be automatically truncated.'
+      }
+    }
 
     if (formData.password !== formData.confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match'
@@ -100,12 +108,29 @@ export default function RegisterPage() {
         throw new Error('Backend is not running. Please start the backend server.')
       }
       
+      // Truncate password to 72 bytes if necessary (bcrypt limit)
+      let passwordToSend = formData.password || ""
+      if (passwordToSend) {
+        const passwordBytes = new TextEncoder().encode(passwordToSend)
+        if (passwordBytes.length > 72) {
+          // Truncate to 72 bytes
+          const truncatedBytes = passwordBytes.slice(0, 72)
+          // Handle UTF-8 boundary - ensure we don't cut in the middle of a character
+          let truncated = new TextDecoder('utf-8', { fatal: false }).decode(truncatedBytes)
+          // If decoding failed, try removing last byte
+          if (!truncated || truncated.length === 0) {
+            truncated = new TextDecoder('utf-8', { fatal: false }).decode(passwordBytes.slice(0, 71))
+          }
+          passwordToSend = truncated
+        }
+      }
+      
       // Prepare request body with explicit password field
       // BYPASS MODE: Password is optional - allow empty passwords
       const requestBody = {
         email: formData.email,
         username: formData.username,
-        password: formData.password || "", // Include password (empty string if not provided - bypass mode)
+        password: passwordToSend, // Truncated password (max 72 bytes)
         full_name: formData.full_name?.trim() || undefined,
         user_type: formData.user_type
       }

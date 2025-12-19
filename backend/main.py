@@ -224,6 +224,25 @@ async def register(request: Request, db=Depends(get_db)):
         elif not isinstance(password, str):
             password = str(password)
         
+        # Truncate password to 72 bytes before validation (bcrypt limit)
+        if password:
+            password_bytes = password.encode('utf-8')
+            if len(password_bytes) > 72:
+                # #region agent log
+                try:
+                    with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                        f.write(json.dumps({"location":"main.py:227","message":"Password exceeds 72 bytes, truncating","data":{"original_length":len(password_bytes)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+                except:
+                    pass
+                # #endregion
+                password_bytes = password_bytes[:72]
+                # Handle UTF-8 boundary
+                try:
+                    password = password_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    password_bytes = password_bytes[:71]
+                    password = password_bytes.decode('utf-8', errors='ignore')
+        
         # Create UserRegister model with required password
         # #region agent log
         try:
