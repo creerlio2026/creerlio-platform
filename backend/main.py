@@ -200,49 +200,29 @@ async def add_cors_header(request: Request, call_next):
 async def register(request: Request, db=Depends(get_db)):
     """Register a new user with email and password - BYPASS MODE: Password optional"""
     body = await request.json()
-    # BYPASS: Ensure password field exists in body (set to empty string if missing)
-    if "password" not in body or body.get("password") is None:
-        body["password"] = ""
+    # Password field completely removed - ignore if present
+    body.pop("password", None)
     # #region agent log
     try:
         with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-            f.write(json.dumps({"location":"main.py:172","message":"Register endpoint called","data":{"body_keys":list(body.keys()) if body else None,"has_password":"password" in body if body else False,"password_type":type(body.get("password")).__name__ if body else None,"password_value_length":len(str(body.get("password"))) if body and body.get("password") else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+            f.write(json.dumps({"location":"main.py:172","message":"Register endpoint called","data":{"body_keys":list(body.keys()) if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
     except:
         pass
     # #endregion
     try:
-        # BYPASS MODE: Password is optional - allow empty/missing passwords
-        password = body.get("password") or ""  # Default to empty string if missing
+        # Password field completely removed - create UserRegister without password
         # #region agent log
         try:
             with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                f.write(json.dumps({"location":"main.py:183","message":"Password validation check (bypass mode)","data":{"password_value":"[REDACTED]" if password else "empty","password_type":type(password).__name__ if password is not None else "None","password_is_none":password is None,"password_is_empty_str":password == "","has_password":bool(password)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
-        except:
-            pass
-        # #endregion
-        
-        # Ensure password is a string (not None) - allow empty strings in bypass mode
-        if password is None:
-            password = ""
-        elif not isinstance(password, str):
-            password = str(password)
-        
-        # Note: Argon2id has no password length limit, so no truncation needed
-        
-        # Create UserRegister model with required password
-        # #region agent log
-        try:
-            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                f.write(json.dumps({"location":"main.py:195","message":"Creating UserRegister model","data":{"email":body.get("email"),"username":body.get("username"),"has_password":bool(password),"password_length":len(str(password)) if password else 0},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+                f.write(json.dumps({"location":"main.py:195","message":"Creating UserRegister model","data":{"email":body.get("email"),"username":body.get("username")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
         except:
             pass
         # #endregion
         try:
-            # BYPASS MODE: Set password to empty string to skip all validation
+            # Password field completely removed
             user_data = UserRegister(
                 email=body.get("email"),
                 username=body.get("username"),
-                password=body.get("password") or "",  # BYPASS: Use empty string if missing/null
                 full_name=body.get("full_name"),
                 user_type=body.get("user_type", "talent")
             )
@@ -250,7 +230,7 @@ async def register(request: Request, db=Depends(get_db)):
             # #region agent log
             try:
                 with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                    f.write(json.dumps({"location":"main.py:207","message":"UserRegister ValidationError","data":{"errors":ve.errors(),"password_provided":bool(password),"password_value":password},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                    f.write(json.dumps({"location":"main.py:207","message":"UserRegister ValidationError","data":{"errors":ve.errors()},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
             except:
                 pass
             # #endregion
@@ -285,52 +265,34 @@ async def register(request: Request, db=Depends(get_db)):
 async def login(request: Request, db=Depends(get_db)):
     """Login and get access token with email and password - BYPASS MODE: Password optional"""
     body = await request.json()
-    # BYPASS: Ensure password field exists in body (set to empty string if missing)
-    if "password" not in body or body.get("password") is None:
-        body["password"] = ""
+    # Password field completely removed - ignore if present
+    body.pop("password", None)
     # #region agent log
     try:
         with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-            f.write(json.dumps({"location":"main.py:210","message":"Login endpoint called","data":{"body_keys":list(body.keys()) if body else None,"has_password":"password" in body if body else False,"password_type":type(body.get("password")).__name__ if body else None,"password_value_length":len(str(body.get("password"))) if body and body.get("password") else None,"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+            f.write(json.dumps({"location":"main.py:210","message":"Login endpoint called","data":{"body_keys":list(body.keys()) if body else None,"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
     except:
         pass
     # #endregion
     
-    # BYPASS MODE: Password is optional - use empty string
-    password = body.get("password") or ""  # Default to empty string if missing
+    # Password field completely removed - create UserLogin without password
     # #region agent log
     try:
         with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-            f.write(json.dumps({"location":"main.py:250","message":"Password validation check (login - bypass mode)","data":{"password_value":"[REDACTED]" if password else "empty","password_type":type(password).__name__ if password is not None else "None","password_is_none":password is None,"password_is_empty_str":password == "","has_password":bool(password)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
-    except:
-        pass
-    # #endregion
-    
-    # Ensure password is a string (not None) - allow empty strings in bypass mode
-    if password is None:
-        password = ""
-    elif not isinstance(password, str):
-        password = str(password)
-    
-    # Create UserLogin model from request body (password required)
-    # #region agent log
-    try:
-        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-            f.write(json.dumps({"location":"main.py:245","message":"Creating UserLogin model","data":{"email":body.get("email"),"has_password":bool(password),"password_length":len(str(password)) if password else 0},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+            f.write(json.dumps({"location":"main.py:245","message":"Creating UserLogin model","data":{"email":body.get("email")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
     except:
         pass
     # #endregion
     try:
-        # BYPASS MODE: Set password to empty string to skip all validation
+        # Password field completely removed
         credentials = UserLogin(
-            email=body.get("email"),
-            password=body.get("password") or ""  # BYPASS: Use empty string if missing/null
+            email=body.get("email")
         )
     except ValidationError as ve:
         # #region agent log
         try:
             with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                f.write(json.dumps({"location":"main.py:257","message":"UserLogin ValidationError","data":{"errors":ve.errors(),"password_provided":bool(password),"password_value":password,"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                    f.write(json.dumps({"location":"main.py:257","message":"UserLogin ValidationError","data":{"errors":ve.errors(),"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
         except:
             pass
         # #endregion
@@ -345,7 +307,7 @@ async def login(request: Request, db=Depends(get_db)):
         # #region agent log
         try:
             with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-                f.write(json.dumps({"location":"main.py:269","message":"UserLogin model creation failed","data":{"error":str(e),"error_type":type(e).__name__,"email":body.get("email") if body else None,"has_password":bool(password) if password else False},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+                f.write(json.dumps({"location":"main.py:269","message":"UserLogin model creation failed","data":{"error":str(e),"error_type":type(e).__name__,"email":body.get("email") if body else None},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
         except:
             pass
         # #endregion

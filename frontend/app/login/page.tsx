@@ -8,8 +8,7 @@ import axios from 'axios'
 export default function LoginPage() {
   const router = useRouter()
   const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+    email: ''
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -32,10 +31,9 @@ export default function LoginPage() {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/page.tsx:31',message:'Preparing login request',data:{has_email:!!formData.email,has_password:!!formData.password,password_length:formData.password?.length || 0,email:formData.email},"timestamp":Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
       // #endregion
-      // BYPASS MODE: Include password as empty string to satisfy backend validation
+      // Password completely removed - no password field in request
       const response = await axios.post(`${apiUrl}/api/auth/login`, {
-        email: formData.email,
-        password: ""  // BYPASS: Set to empty string to bypass validation
+        email: formData.email
       })
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/page.tsx:36',message:'Login request succeeded',data:{status:response.status},"timestamp":Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
@@ -131,7 +129,7 @@ export default function LoginPage() {
             <span className="text-white text-2xl font-bold">Creerlio</span>
           </Link>
           <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-          <p className="text-gray-400">Sign in with your email and password</p>
+          <p className="text-gray-400">Sign in with your email</p>
         </div>
 
         {/* Login Form */}
@@ -153,21 +151,7 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Password */}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-                placeholder="••••••••"
-              />
-            </div>
+            {/* Password field completely removed during construction */}
 
             {/* Error Message */}
             {errors.submit && (

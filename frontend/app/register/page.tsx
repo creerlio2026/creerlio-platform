@@ -10,8 +10,6 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState({
     email: '',
     username: '',
-    password: '',
-    confirmPassword: '',
     full_name: '',
     user_type: 'talent',
     // Business-specific fields
@@ -49,8 +47,7 @@ export default function RegisterPage() {
       newErrors.username = 'Username must be at least 3 characters'
     }
 
-    // BYPASS MODE: Skip all password validation during construction
-    // Password is completely optional
+    // Password fields completely removed during construction
 
     // BYPASS: Skip password matching validation
 
@@ -95,11 +92,10 @@ export default function RegisterPage() {
         throw new Error('Backend is not running. Please start the backend server.')
       }
       
-      // BYPASS MODE: Include password as empty string to satisfy backend validation
+      // Password completely removed - no password field in request
       const requestBody = {
         email: formData.email,
         username: formData.username,
-        password: "",  // BYPASS: Set to empty string to bypass validation
         full_name: formData.full_name?.trim() || undefined,
         user_type: formData.user_type
       }
@@ -119,7 +115,6 @@ export default function RegisterPage() {
         try {
           const loginResponse = await axios.post(`${apiUrl}/api/auth/login`, {
             email: formData.email
-            // BYPASS: Password omitted
           })
           
           if (loginResponse.data.access_token) {
@@ -405,41 +400,7 @@ export default function RegisterPage() {
                 {errors.username && <p className="mt-1 text-sm text-red-400">{errors.username}</p>}
               </div>
 
-              {/* Password - BYPASS MODE: Optional during construction */}
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Password <span className="text-gray-500 text-xs">(Optional - Bypass Mode)</span>
-                </label>
-                <input
-                  type="password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder-gray-400 focus:outline-none transition-colors ${
-                    errors.password ? 'border-red-500' : 'border-blue-500/20 focus:border-blue-500'
-                  }`}
-                  placeholder="•••••••• (Optional)"
-                />
-                {errors.password && <p className="mt-1 text-sm text-red-400">{errors.password}</p>}
-              </div>
-
-              {/* Confirm Password - BYPASS MODE: Optional during construction */}
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Confirm Password <span className="text-gray-500 text-xs">(Optional - Bypass Mode)</span>
-                </label>
-                <input
-                  type="password"
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder-gray-400 focus:outline-none transition-colors ${
-                    errors.confirmPassword ? 'border-red-500' : 'border-blue-500/20 focus:border-blue-500'
-                  }`}
-                  placeholder="•••••••• (Optional)"
-                />
-                {errors.confirmPassword && <p className="mt-1 text-sm text-red-400">{errors.confirmPassword}</p>}
-              </div>
+              {/* Password fields completely removed during construction */}
 
               {/* Submit Error */}
               {errors.submit && (

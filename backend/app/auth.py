@@ -27,7 +27,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 class UserRegister(BaseModel):
     email: EmailStr
     username: str
-    password: Optional[str] = ""  # BYPASS MODE: Default to empty string, completely optional
+    # password: REMOVED during construction
     full_name: Optional[str] = None
     user_type: str = "talent"  # "talent" or "business"
     
@@ -38,7 +38,7 @@ class UserRegister(BaseModel):
 
 class UserLogin(BaseModel):
     email: str
-    password: Optional[str] = ""  # BYPASS MODE: Default to empty string, completely optional
+    # password: REMOVED during construction
     
     class Config:
         # Allow extra fields to be ignored and fields with defaults to be omitted
@@ -138,8 +138,8 @@ def create_user(db: Session, user_data: UserRegister) -> User:
     return db_user
 
 
-def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-    """Authenticate a user with email and password (bypass mode: allows empty password)"""
+def authenticate_user(db: Session, email: str) -> Optional[User]:
+    """Authenticate a user with email only - password completely removed during construction"""
     user = get_user_by_email(db, email)
     if not user:
         return None
@@ -147,8 +147,7 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     if not user.is_active:
         return None
     
-    # BYPASS MODE: Skip all password verification during construction
-    # Allow login regardless of password
+    # Password completely removed - allow login with email only
     
     # Update last login
     user.last_login = datetime.utcnow()
