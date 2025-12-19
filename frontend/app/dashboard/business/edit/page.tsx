@@ -44,12 +44,21 @@ export default function EditBusinessProfilePage() {
   }, [])
 
   const fetchProfile = async (email: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:46',message:'Fetch profile entry',data:{email,hasEmail:!!email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       // Authentication removed - fetch without token for manual profile building
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:50',message:'Before API call',data:{url:`${apiUrl}/api/business/me`,email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       const response = await axios.get(`${apiUrl}/api/business/me`, {
         params: { email }
       })
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:54',message:'Fetch profile success',data:{status:response.status,hasData:!!response.data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       
       if (response.data) {
         setProfile(response.data)
@@ -65,7 +74,10 @@ export default function EditBusinessProfilePage() {
           phone: response.data.phone || ''
         })
       }
-    } catch (error) {
+    } catch (error: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:68',message:'Fetch profile error',data:{hasResponse:!!error.response,status:error.response?.status,errorDetail:error.response?.data?.detail,errorDetailType:typeof error.response?.data?.detail,isArray:Array.isArray(error.response?.data?.detail)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error('Error fetching profile:', error)
     } finally {
       setIsLoading(false)
@@ -93,36 +105,64 @@ export default function EditBusinessProfilePage() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const email = localStorage.getItem('user_email')
+      const email = 'business@creerlio.local' // Use default email since auth removed
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:94',message:'Update profile entry',data:{email,formDataKeys:Object.keys(formData),formData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+
+      const requestBody = {
+        name: formData.name,
+        description: formData.description || null,
+        industry: formData.industry || null,
+        website: formData.website || null,
+        location: formData.location || null,
+        city: formData.city || null,
+        state: formData.state || null,
+        country: formData.country || null,
+        phone: formData.phone || null
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:108',message:'Before PUT request',data:{url:`${apiUrl}/api/business/me`,email,requestBody},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
 
       const response = await axios.put(
         `${apiUrl}/api/business/me`,
+        requestBody,
         {
-          name: formData.name,
-          description: formData.description || null,
-          industry: formData.industry || null,
-          website: formData.website || null,
-          location: formData.location || null,
-          city: formData.city || null,
-          state: formData.state || null,
-          country: formData.country || null,
-          phone: formData.phone || null
-        },
-        {
-          params: { email },
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`
-          }
+          params: { email }
         }
       )
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:120',message:'Update profile success',data:{status:response.status,hasSuccess:!!response.data?.success},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       if (response.data.success) {
         router.push('/dashboard/business')
       }
     } catch (error: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:125',message:'Update profile error',data:{hasResponse:!!error.response,status:error.response?.status,errorDetail:error.response?.data?.detail,errorDetailType:typeof error.response?.data?.detail,isArray:Array.isArray(error.response?.data?.detail),errorDetailString:JSON.stringify(error.response?.data?.detail)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
       console.error('Error updating profile:', error)
+      
+      // Format error message properly - handle FastAPI validation error arrays
+      let errorMessage = 'Failed to update profile. Please try again.'
+      if (error.response?.data?.detail) {
+        const detail = error.response.data.detail
+        if (Array.isArray(detail)) {
+          // FastAPI validation errors are arrays
+          errorMessage = detail.map((err: any) => {
+            const field = err.loc?.join('.') || 'unknown'
+            return `${field}: ${err.msg}`
+          }).join(', ')
+        } else if (typeof detail === 'string') {
+          errorMessage = detail
+        } else {
+          errorMessage = JSON.stringify(detail)
+        }
+      }
       setErrors({
-        submit: error.response?.data?.detail || 'Failed to update profile. Please try again.'
+        submit: errorMessage
       })
     } finally {
       setIsSaving(false)

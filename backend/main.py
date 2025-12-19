@@ -533,9 +533,23 @@ async def get_my_business_profile(
     db=Depends(get_db)
 ):
     """Get current user's business profile"""
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_get_business","timestamp":int(time.time()*1000),"location":"main.py:530","message":"Get business profile entry","data":{"email":email},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except: pass
+    # #endregion
     # Get user by email
     user = get_user_by_email(db, email)
     if not user:
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                import json
+                f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_no_user_get","timestamp":int(time.time()*1000),"location":"main.py:539","message":"User not found in GET","data":{"email":email},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+        except: pass
+        # #endregion
         raise HTTPException(status_code=404, detail="User not found")
     
     if user.user_type != "business":
@@ -545,22 +559,70 @@ async def get_my_business_profile(
     if user.business_profile_id:
         business = db.query(BusinessProfile).filter(BusinessProfile.id == user.business_profile_id).first()
         if business:
+            # #region agent log
+            try:
+                with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                    import json
+                    f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_found","timestamp":int(time.time()*1000),"location":"main.py:550","message":"Business profile found","data":{"businessId":business.id},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+            except: pass
+            # #endregion
             return business
     
     # Return null if no profile exists
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_no_profile","timestamp":int(time.time()*1000),"location":"main.py:555","message":"No business profile exists","data":{"email":email,"hasProfileId":bool(user.business_profile_id)},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except: pass
+    # #endregion
     return None
 
 
 @app.put("/api/business/me")
 async def update_my_business_profile(
-    profile_data: dict,
+    request: Request,
     email: str = Query(..., description="User email address"),
     db=Depends(get_db)
 ):
     """Update current user's business profile"""
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_put_business","timestamp":int(time.time()*1000),"location":"main.py:554","message":"Update business profile entry","data":{"email":email},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+    except: pass
+    # #endregion
+    # Parse request body
+    try:
+        profile_data = await request.json()
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                import json
+                f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_parsed","timestamp":int(time.time()*1000),"location":"main.py:562","message":"Request body parsed","data":{"profileDataKeys":list(profile_data.keys()) if isinstance(profile_data,dict) else "not_dict","profileData":profile_data},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+        except: pass
+        # #endregion
+    except Exception as e:
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                import json
+                f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_parse_err","timestamp":int(time.time()*1000),"location":"main.py:567","message":"JSON parse error","data":{"error":str(e)},"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+        except: pass
+        # #endregion
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+    
     # Get user by email
     user = get_user_by_email(db, email)
     if not user:
+        # #region agent log
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                import json
+                f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_no_user","timestamp":int(time.time()*1000),"location":"main.py:575","message":"User not found","data":{"email":email},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+        except: pass
+        # #endregion
         raise HTTPException(status_code=404, detail="User not found")
     
     if user.user_type != "business":
@@ -589,6 +651,13 @@ async def update_my_business_profile(
     
     db.commit()
     db.refresh(business)
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"id":"log_"+str(int(time.time()))+"_success","timestamp":int(time.time()*1000),"location":"main.py:600","message":"Update business profile success","data":{"businessId":business.id if business else None},"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except: pass
+    # #endregion
     return {"success": True, "business": business}
 
 
