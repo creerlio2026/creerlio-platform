@@ -266,6 +266,48 @@ class Application(Base):
     )
 
 
+class TalentBankItem(Base):
+    """
+    Canonical Talent Bank item model.
+    
+    Stores all talent-owned assets (documents, images, videos) and
+    structured records (experience, education, credentials, links, etc.)
+    in a single flexible table with type-based records and JSON metadata.
+    """
+    __tablename__ = "talent_bank_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Owner
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    # Core identity
+    item_type = Column(String(50), nullable=False, index=True)  # e.g. document, image, video, experience, education, credential
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+
+    # File-related data (for storage-backed assets)
+    file_url = Column(String(1024))        # Public or signed URL to Supabase Storage
+    file_path = Column(String(1024))       # Path within Supabase bucket talent-bank/{user_id}/...
+    file_type = Column(String(100))        # MIME type
+    file_size = Column(Integer)            # Bytes
+
+    # Flexible structured metadata for different item types
+    # Examples:
+    # - experience: { "company": "", "title": "", "startDate": "", "endDate": "", "description": "" }
+    # - education: { "institution": "", "degree": "", "field": "", "startDate": "", "endDate": "" }
+    # - credential: { "issuer": "", "name": "", "issuedDate": "", "expiryDate": "", "credentialId": "" }
+    # - document: { "originalName": "", "tags": [], "notes": "" }
+    metadata = Column(JSON)
+
+    # Flags
+    is_active = Column(Boolean, default=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+
+
 # ==================== Pydantic Models (for API) ====================
 
 class BusinessProfileCreate(BaseModel):
@@ -442,6 +484,38 @@ class ApplicationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
+    class Config:
+        from_attributes = True
+
+
+class TalentBankItemCreate(BaseModel):
+    """
+    Payload for creating a structured (non-file) talent bank item.
+
+    File-backed items should be created via the dedicated upload endpoint,
+    which will populate file_* fields automatically.
+    """
+    item_type: str
+    title: str
+    description: Optional[str] = None
+    metadata: Optional[Dict] = None
+
+
+class TalentBankItemResponse(BaseModel):
+    id: int
+    user_id: int
+    item_type: str
+    title: str
+    description: Optional[str]
+    file_url: Optional[str]
+    file_path: Optional[str]
+    file_type: Optional[str]
+    file_size: Optional[int]
+    metadata: Optional[Dict]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
     class Config:
         from_attributes = True
 

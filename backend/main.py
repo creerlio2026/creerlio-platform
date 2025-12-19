@@ -23,7 +23,17 @@ except:
     pass
 # #endregion
 
-from app.models import BusinessProfile, TalentProfile, ResumeData, User, Job, Application
+from app.models import (
+    BusinessProfile,
+    TalentProfile,
+    ResumeData,
+    User,
+    Job,
+    Application,
+    TalentBankItem,
+    TalentBankItemCreate,
+    TalentBankItemResponse,
+)
 from app.ai_service import AIService
 try:
     from app.pdf_generator import PDFGenerator
@@ -33,6 +43,7 @@ except ImportError:
     PDFGenerator = None
 from app.mapping_service import MappingService
 from app.database import get_db, init_db
+from app.supabase_client import get_supabase
 from app.auth import (
     UserRegister, UserLogin, UserResponse, Token,
     create_user, authenticate_user, create_access_token,
@@ -129,6 +140,13 @@ async def lifespan(app: FastAPI):
     try:
         with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
             import json
+            f.write(json.dumps({"location":"main.py:lifespan:entry","message":"Lifespan function started","data":{},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"D"})+"\n")
+    except: pass
+    # #endregion
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
             routes = []
             for route in app.routes:
                 if hasattr(route, 'path') and hasattr(route, 'methods'):
@@ -143,7 +161,10 @@ async def lifespan(app: FastAPI):
                     routes.append(route_info)
             # Filter to business routes only and sort by path
             business_routes = sorted([r for r in routes if '/api/business' in r['path']], key=lambda x: x['path'])
-            f.write(json.dumps({"location":"main.py:lifespan","message":"Registered business routes on startup","data":{"businessRoutes":business_routes,"totalBusinessRoutes":len(business_routes)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+            f.write(json.dumps({"location":"main.py:lifespan","message":"Registered business routes on startup","data":{"businessRoutes":business_routes,"totalBusinessRoutes":len(business_routes),"totalRoutes":len(routes)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+            # Check specifically for profile/me route
+            profile_me_routes = [r for r in routes if '/api/business/profile/me' in r['path']]
+            f.write(json.dumps({"location":"main.py:lifespan","message":"Profile/me route check","data":{"profileMeRoutes":profile_me_routes,"found":len(profile_me_routes)>0},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
     except Exception as e:
         try:
             with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
@@ -163,6 +184,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+# #region agent log
+try:
+    with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+        import json
+        f.write(json.dumps({"location":"main.py:175","message":"FastAPI app created","data":{"routeCount":len(app.routes)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+except: pass
+# #endregion
 
 # Request logging middleware to debug route matching
 @app.middleware("http")
@@ -202,9 +230,12 @@ async def health_check(request: Request):
     # #region agent log
     try:
         with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
-            f.write(json.dumps({"location":"main.py:165","message":"Health check endpoint accessed","data":{"origin":request.headers.get("origin"),"referer":request.headers.get("referer")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
-    except:
-        pass
+            f.write(json.dumps({"location":"main.py:health_check","message":"Health check endpoint accessed - NEW CODE","data":{"origin":request.headers.get("origin"),"referer":request.headers.get("referer")},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+    except Exception as e:
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                f.write(json.dumps({"location":"main.py:health_check:error","message":"Failed to log health check","data":{"error":str(e)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"B"})+"\n")
+        except: pass
     # #endregion
     # MANUAL CORS HEADERS - WORKAROUND TO FIX CORS BLOCKING
     from fastapi.responses import Response
@@ -543,6 +574,13 @@ async def create_business(business_data: dict, db=Depends(get_db)):
 # IMPORTANT: /api/business/me routes must come BEFORE /api/business/{business_id} routes
 # to prevent FastAPI from matching "me" as a business_id parameter
 # Route order verification: This route MUST be registered before any /api/business/{business_id} routes
+# #region agent log
+try:
+    with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+        import json
+        f.write(json.dumps({"location":"main.py:570","message":"Defining route /api/business/profile/me","data":{},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"C"})+"\n")
+except: pass
+# #endregion
 @app.get("/api/business/profile/me", name="get_my_business_profile")
 async def get_my_business_profile(
     email: str = Query(..., description="User email address"),
@@ -1232,6 +1270,165 @@ async def search_talent(
     return {"talents": results, "count": len(results)}
 
 
+# ==================== Talent Bank ====================
+
+@app.get("/api/talent-bank/items")
+async def list_talent_bank_items(
+    email: str = Query(..., description="User email address"),
+    item_type: Optional[str] = Query(
+        None, description="Optional item type filter (e.g. document, experience, education)"
+    ),
+    db=Depends(get_db),
+):
+    """
+    List talent bank items for the current user.
+
+    NOTE: Authentication is simplified for Phase 1 - user is resolved by email.
+    In Supabase, RLS additionally enforces that users only see their own items.
+    """
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    query = db.query(TalentBankItem).filter(
+        TalentBankItem.user_id == user.id,
+        TalentBankItem.is_active == True,  # noqa: E712
+    )
+
+    if item_type:
+        query = query.filter(TalentBankItem.item_type == item_type)
+
+    items = query.order_by(TalentBankItem.created_at.desc()).all()
+    return {
+        "items": [
+            TalentBankItemResponse.from_orm(item)  # type: ignore[arg-type]
+            for item in items
+        ],
+        "count": len(items),
+    }
+
+
+@app.post("/api/talent-bank/items")
+async def create_talent_bank_item(
+    payload: TalentBankItemCreate,
+    email: str = Query(..., description="User email address"),
+    db=Depends(get_db),
+):
+    """
+    Create a structured (non-file) talent bank item.
+
+    Use this for Experience, Education, Credentials, and other metadata-only records.
+    """
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        item = TalentBankItem(
+            user_id=user.id,
+            item_type=payload.item_type,
+            title=payload.title,
+            description=payload.description,
+            metadata=payload.metadata or {},
+            is_active=True,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return TalentBankItemResponse.from_orm(item)  # type: ignore[arg-type]
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create talent bank item: {str(e)}")
+
+
+@app.post("/api/talent-bank/upload")
+async def upload_talent_bank_files(
+    email: str = Query(..., description="User email address"),
+    files: List[UploadFile] = File(...),
+    db=Depends(get_db),
+):
+    """
+    Upload one or more files into the Talent Bank.
+
+    Files are stored in Supabase Storage bucket:
+      talent-bank/{user_id}/<timestamp>_<filename>
+
+    Each uploaded file creates a corresponding TalentBankItem record.
+    """
+    user = get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    supabase = get_supabase()
+    if supabase is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase client is not configured. Please set SUPABASE_URL and SUPABASE_ANON_KEY.",
+        )
+
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    created_items: List[TalentBankItemResponse] = []
+    bucket_name = "talent-bank"
+
+    for file in files:
+        try:
+            content = await file.read()
+            if not content:
+                continue
+
+            # Basic type detection
+            content_type = file.content_type or "application/octet-stream"
+            filename = file.filename or "file"
+            extension = os.path.splitext(filename)[1].lower()
+
+            if content_type.startswith("image/"):
+                item_type = "image"
+            elif content_type.startswith("video/"):
+                item_type = "video"
+            elif extension in [".pdf", ".doc", ".docx", ".txt", ".rtf"]:
+                item_type = "document"
+            else:
+                item_type = "file"
+
+            # Storage path: talent-bank/{user_id}/<ts>_<filename>
+            timestamp = int(time.time() * 1000)
+            path = f"{user.id}/{timestamp}_{filename}"
+
+            # Upload to Supabase Storage
+            storage = supabase.storage.from_(bucket_name)
+            upload_res = storage.upload(path, content)
+            if getattr(upload_res, "error", None):
+                raise Exception(str(upload_res.error))
+
+            # Public URL (if bucket is public) – adjust as needed
+            public_url = storage.get_public_url(path)
+
+            item = TalentBankItem(
+                user_id=user.id,
+                item_type=item_type,
+                title=filename,
+                description=None,
+                file_url=public_url,
+                file_path=path,
+                file_type=content_type,
+                file_size=len(content),
+                metadata={"originalName": filename},
+                is_active=True,
+            )
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            created_items.append(TalentBankItemResponse.from_orm(item))  # type: ignore[arg-type]
+        except Exception as e:
+            db.rollback()
+            # Continue processing remaining files but record the error
+            raise HTTPException(status_code=500, detail=f"Failed to upload file '{file.filename}': {str(e)}")
+
+    return {"items": created_items, "count": len(created_items)}
+
+
 # ==================== Mapping & Routes ====================
 
 @app.post("/api/mapping/geocode")
@@ -1337,8 +1534,9 @@ if __name__ == "__main__":
         f.write(json.dumps({"location":"main.py:411","message":"Starting uvicorn server","data":{"host":host,"port":port},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
     # #endregion
     try:
+        # Use app directly instead of string import to avoid module caching issues
         uvicorn.run(
-            "main:app",
+            app,
             host=host,
             port=port,
             reload=False  # Disable reload to ensure routes are registered correctly
