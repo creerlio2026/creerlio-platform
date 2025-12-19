@@ -412,6 +412,7 @@ export default function SearchPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={`Search for ${searchType}...`}
                     className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                    style={{ color: 'white' }}
                   />
 
                   {/* Location Filter */}
@@ -421,6 +422,7 @@ export default function SearchPage() {
                     onChange={(e) => setLocation(e.target.value)}
                     placeholder="Location (optional)"
                     className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                    style={{ color: 'white' }}
                   />
 
                   {/* Search Button */}
