@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import MapboxMap from '@/components/MapboxMap'
 
 export default function BusinessDashboard() {
@@ -82,12 +83,13 @@ export default function BusinessDashboard() {
       <section className="bg-gray-900 py-16 px-6 border-t border-gray-800">
         <div className="container mx-auto max-w-7xl">
           <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="relative h-96 bg-gray-800 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-4xl mb-4">📊</div>
-                <div className="text-2xl font-bold text-blue-400">Quality ↑</div>
-                <div className="text-2xl font-bold text-red-400">Cost ↓</div>
-              </div>
+            <div className="relative h-96 rounded-lg overflow-hidden">
+              <Image
+                src="/c__Users_simon_AppData_Roaming_Cursor_User_workspaceStorage_3d5a983ccaf8155d3784f9813736e5e0_images_Screenshot_2025-12-19_103752-a74e1044-c957-4e10-ad5a-c49225f644d2.png"
+                alt="Cost Efficiency"
+                fill
+                className="object-cover"
+              />
             </div>
             <div>
               <h2 className="text-4xl font-bold text-gray-300 mb-6">Cost Efficiency</h2>
@@ -114,11 +116,13 @@ export default function BusinessDashboard() {
       <section className="bg-black py-16 px-6 border-t border-gray-800">
         <div className="container mx-auto max-w-7xl">
           <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="relative h-96 bg-gray-900 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-6xl mb-4">🔍</div>
-                <div className="text-xl text-blue-400">Talent Network</div>
-              </div>
+            <div className="relative h-96 rounded-lg overflow-hidden">
+              <Image
+                src="/c__Users_simon_AppData_Roaming_Cursor_User_workspaceStorage_3d5a983ccaf8155d3784f9813736e5e0_images_Screenshot_2025-12-19_103712-389db486-b00c-4be7-ad7a-0443515f8715.png"
+                alt="Quality of Talent"
+                fill
+                className="object-cover"
+              />
             </div>
             <div>
               <h2 className="text-4xl font-bold text-white mb-6">Quality of Talent</h2>
@@ -142,11 +146,13 @@ export default function BusinessDashboard() {
       <section className="bg-gray-900 py-16 px-6 border-t border-gray-800">
         <div className="container mx-auto max-w-7xl">
           <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="relative h-96 bg-gray-800 rounded-lg flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-6xl mb-4">💍</div>
-                <div className="text-xl text-yellow-400">Partnership</div>
-              </div>
+            <div className="relative h-96 rounded-lg overflow-hidden">
+              <Image
+                src="/c__Users_simon_AppData_Roaming_Cursor_User_workspaceStorage_3d5a983ccaf8155d3784f9813736e5e0_images_Screenshot_2025-12-19_103828-b2c20bf6-dadb-4adb-b9b7-48b69e5d2b4e.png"
+                alt="Engagement and Relationships"
+                fill
+                className="object-cover"
+              />
             </div>
             <div>
               <h2 className="text-4xl font-bold text-gray-300 mb-6">Engagement and Relationships</h2>
@@ -173,11 +179,13 @@ export default function BusinessDashboard() {
       <section className="bg-black py-16 px-6 border-t border-gray-800">
         <div className="container mx-auto max-w-7xl">
           <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div className="relative h-96 bg-gray-900 rounded-lg flex items-center justify-center overflow-hidden">
-              <div className="text-center z-10">
-                <div className="text-5xl font-bold text-white mb-2">GOALS</div>
-                <div className="text-4xl">➡️</div>
-              </div>
+            <div className="relative h-96 rounded-lg overflow-hidden">
+              <Image
+                src="/c__Users_simon_AppData_Roaming_Cursor_User_workspaceStorage_3d5a983ccaf8155d3784f9813736e5e0_images_Screenshot_2025-12-19_103809-df026577-5ffd-4775-9124-18a961b5715e.png"
+                alt="Future Planning"
+                fill
+                className="object-cover"
+              />
             </div>
             <div>
               <h2 className="text-4xl font-bold text-gray-300 mb-6">Future Planning</h2>
@@ -222,7 +230,7 @@ export default function BusinessDashboard() {
         </div>
       </section>
 
-      {/* Map Section */}
+      {/* Map Section - KEEP THIS */}
       <section className="bg-gray-900 py-16 px-6 border-t border-gray-800">
         <div className="container mx-auto max-w-7xl">
           <div className="h-[600px] rounded-lg overflow-hidden">
