@@ -1,2 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+openai
+langchain
+langchain-core
+PyPDF2
+python-docx
+python-jose[cryptography]
 passlib[argon2]==1.7.4
 argon2-cffi==23.1.0
+psycopg2-binary
+supabase
+pydantic

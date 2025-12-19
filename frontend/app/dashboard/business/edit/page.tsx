@@ -80,6 +80,12 @@ export default function EditBusinessProfilePage() {
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:68',message:'Fetch profile error',data:{hasResponse:!!error.response,status:error.response?.status,errorDetail:error.response?.data?.detail,errorDetailType:typeof error.response?.data?.detail,isArray:Array.isArray(error.response?.data?.detail)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
       // #endregion
       console.error('Error fetching profile:', error)
+      // If profile doesn't exist (404), that's okay - user can create one by submitting the form
+      // The PUT endpoint will create the profile if it doesn't exist
+      if (error.response?.status === 404) {
+        // Profile doesn't exist yet - allow user to create it
+        setProfile(null)
+      }
     } finally {
       setIsLoading(false)
     }
