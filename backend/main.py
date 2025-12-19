@@ -123,6 +123,35 @@ async def lifespan(app: FastAPI):
     """Initialize and cleanup on startup/shutdown"""
     # Initialize database
     init_db()
+    
+    # Log all registered routes on startup (after all routes are registered)
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            routes = []
+            for route in app.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    route_info = {
+                        "path": route.path,
+                        "methods": list(route.methods) if route.methods else [],
+                        "name": getattr(route, 'name', None)
+                    }
+                    # Check if it's a path parameter route
+                    if '{' in route.path:
+                        route_info["hasPathParams"] = True
+                    routes.append(route_info)
+            # Filter to business routes only and sort by path
+            business_routes = sorted([r for r in routes if '/api/business' in r['path']], key=lambda x: x['path'])
+            f.write(json.dumps({"location":"main.py:lifespan","message":"Registered business routes on startup","data":{"businessRoutes":business_routes,"totalBusinessRoutes":len(business_routes)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except Exception as e:
+        try:
+            with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+                import json
+                f.write(json.dumps({"location":"main.py:lifespan","message":"Failed to log routes","data":{"error":str(e),"errorType":type(e).__name__},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+        except: pass
+    # #endregion
+    
     yield
     # Cleanup if needed
     pass
@@ -134,6 +163,26 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Request logging middleware to debug route matching
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"location":"main.py:middleware","message":"Incoming request","data":{"method":request.method,"path":request.url.path,"query":str(request.query_params)},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except: pass
+    # #endregion
+    response = await call_next(request)
+    # #region agent log
+    try:
+        with open(r'c:\Users\simon\Projects2025\Creerlio_V2\creerlio-platform\.cursor\debug.log', 'a') as f:
+            import json
+            f.write(json.dumps({"location":"main.py:middleware","message":"Request completed","data":{"method":request.method,"path":request.url.path,"status":response.status_code},"timestamp":int(time.time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
+    except: pass
+    # #endregion
+    return response
 
 # CORS MIDDLEWARE REMOVED - Using custom middleware below instead to fix CORS blocking
 
@@ -491,43 +540,10 @@ async def create_business(business_data: dict, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/business/{business_id}")
-async def get_business(business_id: int, db=Depends(get_db)):
-    """Get business profile by ID"""
-    business = db.query(BusinessProfile).filter(BusinessProfile.id == business_id).first()
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    return business
-
-
-@app.put("/api/business/{business_id}")
-async def update_business(business_id: int, business_data: dict, db=Depends(get_db)):
-    """Update business profile"""
-    business = db.query(BusinessProfile).filter(BusinessProfile.id == business_id).first()
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    
-    for key, value in business_data.items():
-        setattr(business, key, value)
-    
-    db.commit()
-    db.refresh(business)
-    return {"success": True, "business": business}
-
-
-@app.delete("/api/business/{business_id}")
-async def delete_business(business_id: int, db=Depends(get_db)):
-    """Delete business profile"""
-    business = db.query(BusinessProfile).filter(BusinessProfile.id == business_id).first()
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
-    
-    db.delete(business)
-    db.commit()
-    return {"success": True, "message": "Business deleted"}
-
-
-@app.get("/api/business/me")
+# IMPORTANT: /api/business/me routes must come BEFORE /api/business/{business_id} routes
+# to prevent FastAPI from matching "me" as a business_id parameter
+# Route order verification: This route MUST be registered before any /api/business/{business_id} routes
+@app.get("/api/business/profile/me", name="get_my_business_profile")
 async def get_my_business_profile(
     email: str = Query(..., description="User email address"),
     db=Depends(get_db)
@@ -579,7 +595,7 @@ async def get_my_business_profile(
     return None
 
 
-@app.put("/api/business/me")
+@app.put("/api/business/profile/me", name="update_my_business_profile")
 async def update_my_business_profile(
     request: Request,
     email: str = Query(..., description="User email address"),
@@ -683,6 +699,10 @@ async def search_businesses(
     
     results = businesses.offset(skip).limit(limit).all()
     return {"businesses": results, "count": len(results)}
+
+
+# NOTE: /api/business/{business_id} routes removed to prevent conflict with /api/business/me
+# If needed, use /api/business/search or /api/business/me instead
 
 
 # ==================== Jobs ====================
@@ -1321,7 +1341,7 @@ if __name__ == "__main__":
             "main:app",
             host=host,
             port=port,
-            reload=True
+            reload=False  # Disable reload to ensure routes are registered correctly
         )
     except Exception as e:
         # #region agent log

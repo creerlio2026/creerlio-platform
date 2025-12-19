@@ -51,9 +51,10 @@ export default function EditBusinessProfilePage() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       // Authentication removed - fetch without token for manual profile building
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:50',message:'Before API call',data:{url:`${apiUrl}/api/business/me`,email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:50',message:'Before API call',data:{url:`${apiUrl}/api/business/profile/me`,email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
-      const response = await axios.get(`${apiUrl}/api/business/me`, {
+      // Use /api/business/profile/me to avoid route conflict
+      const response = await axios.get(`${apiUrl}/api/business/profile/me`, {
         params: { email }
       })
       // #region agent log
@@ -125,8 +126,9 @@ export default function EditBusinessProfilePage() {
       fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:108',message:'Before PUT request',data:{url:`${apiUrl}/api/business/me`,email,requestBody},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
 
+      // Use /api/business/profile/me to avoid route conflict
       const response = await axios.put(
-        `${apiUrl}/api/business/me`,
+        `${apiUrl}/api/business/profile/me`,
         requestBody,
         {
           params: { email }
