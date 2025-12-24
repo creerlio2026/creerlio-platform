@@ -4,7 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from 'axios';
+import { supabase } from "@/lib/supabase";
 
 const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
   ssr: false,
@@ -15,7 +15,6 @@ export default function Home() {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'talent' | 'business'>('talent');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userType, setUserType] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   useEffect(() => {
@@ -38,45 +37,41 @@ export default function Home() {
     }
     window.addEventListener('hashchange', handleHashChange)
     
-    // Check auth status
-    const checkAuth = () => {
-      const token = localStorage.getItem('access_token')
-      const email = localStorage.getItem('user_email')
-      const storedUserType = localStorage.getItem('user_type')
-      
-      setIsAuthenticated(!!token && !!email)
-      if (storedUserType) {
-        setUserType(storedUserType)
-      }
-      
-      // Try to get user type if authenticated but not stored
-      if (token && email && !storedUserType) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-        axios.get(`${apiUrl}/api/auth/me`, {
-          params: { email },
-          headers: { Authorization: `Bearer ${token}` }
-        }).then(response => {
-          const userType = response.data.user_type
-          setUserType(userType)
-          localStorage.setItem('user_type', userType)
-        }).catch(() => {
-          // If auth fails, clear auth state
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('user_email')
-          localStorage.removeItem('user_type')
-          setIsAuthenticated(false)
-        })
+    // Supabase auth status (source of truth)
+    const checkAuth = async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        setIsAuthenticated(!!data.session?.user?.id)
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-auth',hypothesisId:'A',location:'frontend/app/page.tsx:checkAuth',message:'home auth check',data:{hasSession:!!data.session?.user?.id},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      } catch {
+        setIsAuthenticated(false)
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-auth',hypothesisId:'A',location:'frontend/app/page.tsx:checkAuth',message:'home auth check failed',data:{},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
       }
     }
-    
-    checkAuth()
-    // Listen for storage changes (logout from other tabs)
-    window.addEventListener('storage', checkAuth)
+
+    checkAuth().catch(() => {})
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      checkAuth().catch(() => {})
+    })
+
     return () => {
       window.removeEventListener('hashchange', handleHashChange)
-      window.removeEventListener('storage', checkAuth)
+      sub?.subscription?.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-render',hypothesisId:'B',location:'frontend/app/page.tsx:buttons',message:'home header button visibility',data:{activeTab,isAuthenticated,showsCreateTalent:!isAuthenticated,showsCreateBusiness:!isAuthenticated,showsTalentDashboard:true,showsBusinessDashboard:true},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'post-fix',hypothesisId:'B2',location:'frontend/app/page.tsx:buttons',message:'home header button visibility (post-fix computed)',data:{activeTab,isAuthenticated,showsCreateTalent:!isAuthenticated,showsCreateBusiness:!isAuthenticated,showsTalentDashboard:isAuthenticated,showsBusinessDashboard:isAuthenticated,showsSignInTalent:!isAuthenticated,showsSignInBusiness:!isAuthenticated},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [activeTab, isAuthenticated])
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -112,28 +107,100 @@ export default function Home() {
             {/* Navigation Links */}
             <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
               <Link href="/about" className="hover:text-blue-400 transition-colors">About</Link>
-              <Link href="/dashboard/talent" className="hover:text-blue-400 transition-colors">Talent</Link>
-              <Link href="/dashboard/business" className="hover:text-blue-400 transition-colors">Business</Link>
+              <Link href="/#talent" className="hover:text-blue-400 transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-blue-400 transition-colors">Business</Link>
               <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
               <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
               <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
-              {/* Login/Register removed - direct access to dashboards */}
+              {!isAuthenticated ? (
+                <Link href="/login" className="hover:text-blue-400 transition-colors">Sign in</Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await supabase.auth.signOut()
+                    router.refresh()
+                  }}
+                  className="hover:text-blue-400 transition-colors text-left"
+                >
+                  Sign out
+                </button>
+              )}
             </nav>
 
             {/* CTA Buttons - Direct access to dashboards */}
             <div className="flex gap-3">
-              <Link
-                href="/dashboard/talent"
-                className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
-              >
-                Talent Dashboard
-              </Link>
-              <Link
-                href="/dashboard/business"
-                className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
-              >
-                Business Dashboard
-              </Link>
+              {!isAuthenticated && (
+                <div className="hidden sm:flex items-center gap-2">
+                  <Link
+                    href="/login/talent?mode=signup&redirect=/dashboard/talent"
+                    className="px-4 py-2 rounded-lg bg-blue-500/15 border border-blue-500/30 hover:bg-blue-500/25 font-semibold text-sm text-blue-100 transition-colors"
+                  >
+                    Create Talent account
+                  </Link>
+                  <Link
+                    href="/login/business?mode=signup&redirect=/dashboard/business"
+                    className="px-4 py-2 rounded-lg bg-green-500/15 border border-green-500/30 hover:bg-green-500/25 font-semibold text-sm text-green-100 transition-colors"
+                  >
+                    Create Business account
+                  </Link>
+                </div>
+              )}
+              {!isAuthenticated ? (
+                <>
+                  <Link
+                    href="/login/talent?mode=signin&redirect=/dashboard/talent"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('creerlio_active_role', 'talent')
+                        localStorage.setItem('user_type', 'talent')
+                      } catch {}
+                    }}
+                    className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                  >
+                    Sign in (Talent)
+                  </Link>
+                  <Link
+                    href="/login/business?mode=signin&redirect=/dashboard/business"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('creerlio_active_role', 'business')
+                        localStorage.setItem('user_type', 'business')
+                      } catch {}
+                    }}
+                    className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
+                  >
+                    Sign in (Business)
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/dashboard/talent"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('creerlio_active_role', 'talent')
+                        localStorage.setItem('user_type', 'talent')
+                      } catch {}
+                    }}
+                    className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                  >
+                    Talent Dashboard
+                  </Link>
+                  <Link
+                    href="/dashboard/business"
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('creerlio_active_role', 'business')
+                        localStorage.setItem('user_type', 'business')
+                      } catch {}
+                    }}
+                    className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
+                  >
+                    Business Dashboard
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>

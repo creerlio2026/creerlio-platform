@@ -1,43 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import PortfolioEditor from '@/components/PortfolioEditor'
-import axios from 'axios'
 
 export default function PortfolioPage() {
-  const router = useRouter()
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    // Check if user is authenticated
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-    
-    if (!token || !email) {
-      // Redirect to login if not authenticated
-      router.push('/login')
-      return
-    }
-    
-    setIsAuthenticated(true)
-    setIsLoading(false)
-  }, [router])
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-white">Loading...</div>
-      </div>
-    )
-  }
-
-  if (!isAuthenticated) {
-    return null // Will redirect
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}

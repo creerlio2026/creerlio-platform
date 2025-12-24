@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import axios from 'axios'
 import SearchMap from '@/components/SearchMap'
+import { supabase } from '@/lib/supabase'
 
 interface Job {
   id: number
@@ -28,13 +29,11 @@ interface Talent {
 }
 
 interface Business {
-  id: number
+  id: string
   name: string
-  description: string | null
-  industry: string | null
-  location: string | null
-  latitude?: number | null
-  longitude?: number | null
+  tagline?: string | null
+  mission?: string | null
+  slug?: string | null
 }
 
 interface MapMarker {
@@ -48,8 +47,10 @@ interface MapMarker {
 
 export default function SearchPage() {
   const router = useRouter()
+  const params = useSearchParams()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [userType, setUserType] = useState<string | null>(null)
+  const [activeRole, setActiveRole] = useState<'talent' | 'business' | null>(null)
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -70,12 +71,57 @@ export default function SearchPage() {
     const token = localStorage.getItem('access_token')
     const email = localStorage.getItem('user_email')
     const storedUserType = localStorage.getItem('user_type')
+    const storedActiveRole = localStorage.getItem('creerlio_active_role')
     
     setIsAuthenticated(!!token && !!email)
     if (storedUserType) {
       setUserType(storedUserType)
     }
+    if (storedActiveRole === 'talent' || storedActiveRole === 'business') {
+      setActiveRole(storedActiveRole)
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S1',location:'frontend/app/search/page.tsx:mount',message:'Search auth from localStorage',data:{hasToken:!!token,hasEmail:!!email,storedUserType:storedUserType??null,storedActiveRole:storedActiveRole??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    // Compare with Supabase session (source of truth for signed-in users)
+    supabase.auth.getSession().then(({ data }) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2',location:'frontend/app/search/page.tsx:mount',message:'Search auth from Supabase session',data:{hasSession:!!data.session?.user?.id,hasSessionEmail:!!data.session?.user?.email},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    }).catch(() => {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2',location:'frontend/app/search/page.tsx:mount',message:'Search Supabase session check failed',data:{},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+    })
   }, [])
+
+  useEffect(() => {
+    const from = params?.get('from') || null
+    const context = params?.get('context') || null
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S4',location:'frontend/app/search/page.tsx:params',message:'Search page context params',data:{from,context,path:typeof window!=='undefined'?window.location.pathname+window.location.search:null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const allowTalentSearch = isAuthenticated && userType === 'business' && activeRole !== 'talent'
+  const isPublicTalentAudience = !isAuthenticated || userType !== 'business' || activeRole === 'talent'
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S3',location:'frontend/app/search/page.tsx:computed',message:'Search computed auth/cta',data:{isAuthenticated,userType,activeRole,showSignInCTA:!isAuthenticated,allowTalentSearch,isPublicTalentAudience},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+  }, [isAuthenticated, userType, activeRole, allowTalentSearch, isPublicTalentAudience])
+
+  useEffect(() => {
+    // If Talent search is not allowed in this context, ensure we aren't stuck on that tab.
+    if (!allowTalentSearch && searchType === 'talent') {
+      setSearchType('jobs')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowTalentSearch])
 
   // Geocode location string to coordinates using Mapbox Geocoding API
   const geocodeLocation = async (location: string): Promise<{ lat: number; lng: number } | null> => {
@@ -109,12 +155,16 @@ export default function SearchPage() {
         setMapMarkers([])
         return
       }
+      if (searchType === 'talent' && !allowTalentSearch) {
+        setMapMarkers([])
+        return
+      }
 
       setIsGeocoding(true)
       const markers: MapMarker[] = []
 
       // Process Talent results
-      if (searchResults.talent && searchResults.talent.length > 0) {
+      if (searchType === 'talent' && searchResults.talent && searchResults.talent.length > 0) {
         for (const talent of searchResults.talent) {
           let lat: number | null = null
           let lng: number | null = null
@@ -147,34 +197,8 @@ export default function SearchPage() {
 
       // Process Business results
       if (searchResults.businesses && searchResults.businesses.length > 0) {
-        for (const business of searchResults.businesses) {
-          let lat: number | null = null
-          let lng: number | null = null
-
-          // Use existing coordinates if available
-          if (business.latitude && business.longitude) {
-            lat = business.latitude
-            lng = business.longitude
-          } else if (business.location) {
-            // Geocode location string
-            const coords = await geocodeLocation(business.location)
-            if (coords) {
-              lat = coords.lat
-              lng = coords.lng
-            }
-          }
-
-          if (lat !== null && lng !== null) {
-            markers.push({
-              id: business.id,
-              lat,
-              lng,
-              title: business.name,
-              description: business.industry || undefined,
-              type: 'business'
-            })
-          }
-        }
+        // Business search uses business_profile_pages which does not include coordinates/location yet.
+        // Keep results list functional; map pins will remain empty unless coordinates are added later.
       }
 
       setMapMarkers(markers)
@@ -215,6 +239,10 @@ export default function SearchPage() {
         // #endregion
         setSearchResults({ jobs: response.data.jobs || [] })
       } else if (searchType === 'talent') {
+        if (!allowTalentSearch) {
+          setError('Talent search is only available to Business accounts.')
+          return
+        }
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:77',message:'Searching talent',data:{url:`${apiUrl}/api/talent/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
@@ -236,20 +264,37 @@ export default function SearchPage() {
         // #region agent log
         fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:89',message:'Searching businesses',data:{url:`${apiUrl}/api/business/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
         // #endregion
-        // Build params object, only including non-empty values
-        const params: Record<string, string> = {}
-        if (searchQuery && searchQuery.trim()) {
-          params.query = searchQuery.trim()
+        // IMPORTANT: do not depend on localhost:8000 backend (often offline in this environment).
+        // Search published business profiles directly from Supabase (RLS-safe public read).
+        const q = (searchQuery || '').trim()
+        if (!q) {
+          setSearchResults({ businesses: [] })
+          return
         }
-        if (location && location.trim()) {
-          params.location = location.trim()
-        }
-        
-        const response = await axios.get(`${apiUrl}/api/business/search`, { params })
+
+        const or = `name.ilike.%${q}%,tagline.ilike.%${q}%,mission.ilike.%${q}%,slug.ilike.%${q}%`
+        const res = await supabase
+          .from('business_profile_pages')
+          .select('business_id, slug, name, tagline, mission')
+          .eq('is_published', true)
+          .or(or)
+          .limit(50)
+
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:97',message:'Business search succeeded',data:{count:response.data?.businesses?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_supabase',message:'Business search via Supabase completed',data:{q,or,isPublished:true,ok:!res.error,count:(res.data||[]).length,firstSlug:(res.data as any)?.[0]?.slug ?? null,errCode:(res.error as any)?.code ?? null,errMsg:(res.error as any)?.message ?? null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
         // #endregion
-        setSearchResults({ businesses: response.data.businesses || [] })
+
+        if (res.error) throw res.error
+
+        const mapped: Business[] = (res.data || []).map((r: any) => ({
+          id: String(r.business_id),
+          slug: typeof r.slug === 'string' ? r.slug : null,
+          name: typeof r.name === 'string' ? r.name : 'Business',
+          tagline: typeof r.tagline === 'string' ? r.tagline : null,
+          mission: typeof r.mission === 'string' ? r.mission : null,
+        }))
+
+        setSearchResults({ businesses: mapped })
       }
     } catch (err: any) {
       // #region agent log
@@ -350,11 +395,29 @@ export default function SearchPage() {
           {/* Hero Section */}
           <div className="text-center space-y-6">
             <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-              Search <span className="text-blue-400">Talent, Businesses or Jobs</span>
+              Search <span className="text-blue-400">{isPublicTalentAudience ? 'Businesses or Jobs' : 'Talent, Businesses or Jobs'}</span>
             </h1>
             <p className="text-xl text-slate-300 max-w-3xl mx-auto">
-              Find the perfect match with AI-powered search
+              {isPublicTalentAudience
+                ? 'Explore businesses and roles on Creerlio — then create a portfolio so businesses can connect with you.'
+                : 'Find the perfect match with AI-powered search'}
             </p>
+            {!isAuthenticated ? (
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <Link
+                  href="/login?redirect=/portfolio"
+                  className="px-6 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 font-semibold text-white transition-colors"
+                >
+                  Create your free Talent Portfolio
+                </Link>
+                <Link
+                  href="/jobs"
+                  className="px-6 py-3 rounded-xl border border-white/15 text-white hover:bg-white/5 transition-colors"
+                >
+                  Browse jobs
+                </Link>
+              </div>
+            ) : null}
           </div>
 
           {/* Search Interface with Map */}
@@ -376,6 +439,7 @@ export default function SearchPage() {
                     >
                       Jobs
                     </button>
+                    {allowTalentSearch ? (
                     <button
                       type="button"
                       onClick={() => setSearchType('talent')}
@@ -387,6 +451,7 @@ export default function SearchPage() {
                     >
                       Talent
                     </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => setSearchType('business')}
@@ -405,7 +470,13 @@ export default function SearchPage() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={`Search for ${searchType}...`}
+                    placeholder={
+                      searchType === 'jobs'
+                        ? 'Search jobs… (e.g. receptionist, aged care, apprentice)'
+                        : searchType === 'business'
+                          ? 'Search businesses… (e.g. industry, company, program)'
+                          : 'Search talent…'
+                    }
                     className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
                     style={{ color: 'white' }}
                   />
@@ -522,7 +593,7 @@ export default function SearchPage() {
                 </div>
               )}
 
-              {searchResults.talent && searchResults.talent.length > 0 && (
+              {allowTalentSearch && searchResults.talent && searchResults.talent.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Talent ({searchResults.talent.length})</h2>
                   {mapMarkers.length === 0 && searchResults.talent.some(t => t.location) && (
@@ -564,9 +635,9 @@ export default function SearchPage() {
               {searchResults.businesses && searchResults.businesses.length > 0 && (
                 <div>
                   <h2 className="text-2xl font-bold mb-4">Businesses ({searchResults.businesses.length})</h2>
-                  {mapMarkers.length === 0 && searchResults.businesses.some(b => b.location) && (
+                  {mapMarkers.length === 0 && (
                     <p className="text-slate-400 text-sm mb-4">
-                      Note: Some businesses may not have location data available for mapping.
+                      Map pins require business location coordinates. You can still open the Business Profile and connect.
                     </p>
                   )}
                   <div className="grid md:grid-cols-2 gap-4">
@@ -576,15 +647,20 @@ export default function SearchPage() {
                         className="rounded-xl bg-slate-900/70 border border-white/10 p-6"
                       >
                         <h3 className="text-xl font-semibold mb-2">{business.name}</h3>
-                        {business.industry && (
-                          <p className="text-blue-400 mb-2">{business.industry}</p>
-                        )}
-                        {business.description && (
-                          <p className="text-slate-400 text-sm mb-3 line-clamp-2">{business.description}</p>
-                        )}
-                        {business.location && (
-                          <p className="text-slate-300 text-sm">📍 {business.location}</p>
-                        )}
+                        {business.tagline ? (
+                          <p className="text-blue-200 mb-2">{business.tagline}</p>
+                        ) : null}
+                        {business.mission ? (
+                          <p className="text-slate-400 text-sm mb-3 line-clamp-2">{business.mission}</p>
+                        ) : null}
+                        {business.slug ? (
+                          <Link
+                            href={`/business/${business.slug}`}
+                            className="inline-flex items-center gap-2 mt-3 px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-200 hover:bg-blue-500/30 transition-colors"
+                          >
+                            View Business Profile →
+                          </Link>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -593,7 +669,7 @@ export default function SearchPage() {
 
               {/* No Results */}
               {((searchResults.jobs && searchResults.jobs.length === 0) ||
-                (searchResults.talent && searchResults.talent.length === 0) ||
+                (allowTalentSearch && searchResults.talent && searchResults.talent.length === 0) ||
                 (searchResults.businesses && searchResults.businesses.length === 0)) && (
                 <div className="text-center py-12">
                   <p className="text-slate-400 text-lg">No results found. Try different search terms.</p>
