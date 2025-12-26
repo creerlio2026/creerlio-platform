@@ -1,9 +1,82 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+
+let pdfJsLibPromise: Promise<any> | null = null
+function loadPdfJsLib() {
+  if (pdfJsLibPromise) return pdfJsLibPromise
+  pdfJsLibPromise = new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('pdfjs can only load in the browser'))
+    const w = window as any
+    if (w.pdfjsLib) return resolve(w.pdfjsLib)
+
+    const script = document.createElement('script')
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+    script.async = true
+    script.onload = () => {
+      if (w.pdfjsLib) {
+        w.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+        resolve(w.pdfjsLib)
+      } else {
+        reject(new Error('Failed to load pdfjs'))
+      }
+    }
+    script.onerror = () => reject(new Error('Failed to load pdfjs script'))
+    document.head.appendChild(script)
+  })
+  return pdfJsLibPromise
+}
+
+function CollapsibleTextarea({
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  className,
+  expandKey,
+  defaultRows = 5,
+  expanded,
+  onToggle,
+}: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
+  placeholder?: string
+  disabled?: boolean
+  className?: string
+  expandKey: string
+  defaultRows?: number
+  expanded: boolean
+  onToggle: (key: string) => void
+}) {
+  const lineCount = String(value || '').split('\n').length
+  const needsExpansion = lineCount > defaultRows || String(value || '').length > 200
+
+  return (
+    <div className="relative">
+      <textarea
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className={className}
+        rows={expanded ? Math.max(defaultRows, lineCount) : defaultRows}
+      />
+      {needsExpansion && (
+        <button
+          type="button"
+          onClick={() => onToggle(expandKey)}
+          className="mt-2 px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-white rounded disabled:opacity-50 transition-colors"
+          disabled={disabled}
+        >
+          {expanded ? '▲ Show Less' : '▼ Show More'}
+        </button>
+      )}
+    </div>
+  )
+}
 
 interface PortfolioData {
   name: string
@@ -13,6 +86,10 @@ interface PortfolioData {
   banner_path?: string | null
   sectionOrder?: string[]
   introVideoId?: number | null
+  socialLinks: Array<{
+    platform: string
+    url: string
+  }>
   skills: string[]
   experience: Array<{
     company: string
@@ -26,6 +103,15 @@ interface PortfolioData {
     degree: string
     field: string
     year: string
+  }>
+  referees: Array<{
+    name: string
+    relationship: string
+    company: string
+    title: string
+    email: string
+    phone: string
+    notes: string
   }>
   attachments: Array<{
     id: number
@@ -55,8 +141,20 @@ interface TalentBankItem {
 
 export default function PortfolioEditor() {
   const router = useRouter()
-  const DEFAULT_SECTION_ORDER = ['intro', 'social', 'skills', 'experience', 'education', 'projects', 'attachments'] as const
+  const DEFAULT_SECTION_ORDER = ['intro', 'social', 'skills', 'experience', 'education', 'referees', 'projects', 'attachments'] as const
   type SectionKey = (typeof DEFAULT_SECTION_ORDER)[number]
+  const SOCIAL_PLATFORMS = [
+    'LinkedIn',
+    'GitHub',
+    'YouTube',
+    'X',
+    'Instagram',
+    'Facebook',
+    'TikTok',
+    'Behance',
+    'Dribbble',
+    'Website',
+  ] as const
   const [portfolio, setPortfolio] = useState<PortfolioData>({
     name: '',
     title: '',
@@ -65,19 +163,32 @@ export default function PortfolioEditor() {
     banner_path: null,
     sectionOrder: [...DEFAULT_SECTION_ORDER],
     introVideoId: null,
+    socialLinks: [],
     skills: [],
     experience: [],
     education: [],
+    referees: [],
     attachments: [],
     projects: []
   })
 
   const [newSkill, setNewSkill] = useState('')
+  type BulkSection = 'skills' | 'experience' | 'education' | 'referees' | 'attachments' | 'projects'
+  const [bulkSel, setBulkSel] = useState<Record<BulkSection, Record<string, boolean>>>({
+    skills: {},
+    experience: {},
+    education: {},
+    referees: {},
+    attachments: {},
+    projects: {},
+  })
   const [sectionEdit, setSectionEdit] = useState<Record<string, boolean>>({
     basic: true,
+    social: true,
     skills: true,
     experience: true,
     education: true,
+    referees: true,
     attachments: true,
     projects: true,
   })
@@ -94,14 +205,25 @@ export default function PortfolioEditor() {
   const [activeProjectIndex, setActiveProjectIndex] = useState<number | null>(null)
   const [projectSelectedIds, setProjectSelectedIds] = useState<Record<number, boolean>>({})
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
+  const [tbItemCache, setTbItemCache] = useState<Record<number, TalentBankItem>>({})
   const [preview, setPreview] = useState<
     | { kind: 'image'; url: string; title: string }
     | { kind: 'video'; url: string; title: string }
     | null
   >(null)
+  const [livePreviewOpen, setLivePreviewOpen] = useState(false)
 
   const [layoutDragIndex, setLayoutDragIndex] = useState<number | null>(null)
   const [introModalOpen, setIntroModalOpen] = useState(false)
+  
+  // Track expanded state for textareas (key format: "section-index" or "section")
+  const [expandedTextareas, setExpandedTextareas] = useState<Record<string, boolean>>({})
+  
+  // Helper function to toggle textarea expansion
+  const toggleTextarea = (key: string) => {
+    setExpandedTextareas(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
   const [introItems, setIntroItems] = useState<TalentBankItem[]>([])
   const [introPickId, setIntroPickId] = useState<number | null>(null)
   const [introPreviewUrl, setIntroPreviewUrl] = useState<string | null>(null)
@@ -110,6 +232,410 @@ export default function PortfolioEditor() {
     // Load existing saved portfolio (if present)
     loadSavedPortfolio()
   }, [])
+
+  // Ensure we have an intro video preview URL even if it was previously saved (without opening the picker modal).
+  useEffect(() => {
+    let cancelled = false
+    async function loadIntroPreview() {
+      const id = typeof portfolio.introVideoId === 'number' ? portfolio.introVideoId : null
+      if (!id) {
+        if (!cancelled) setIntroPreviewUrl(null)
+        return
+      }
+      if (introPreviewUrl) return
+      const uid = await getUserId()
+      if (!uid) return
+      const row = await supabase
+        .from('talent_bank_items')
+        .select('id,file_path,title,file_type')
+        .eq('user_id', uid)
+        .eq('id', id)
+        .maybeSingle()
+      const filePath = (row.data as any)?.file_path as string | null
+      if (!filePath) return
+      const { data: urlData } = await supabase.storage.from('talent-bank').createSignedUrl(filePath, 60 * 30)
+      if (!cancelled) setIntroPreviewUrl(urlData?.signedUrl ?? null)
+    }
+    loadIntroPreview().catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portfolio.introVideoId])
+
+  function LivePreview() {
+    const order = Array.isArray(portfolio.sectionOrder) ? portfolio.sectionOrder : [...DEFAULT_SECTION_ORDER]
+    const social = Array.isArray(portfolio.socialLinks) ? portfolio.socialLinks.filter((s) => (s?.url || '').trim()) : []
+
+    const [bioExpanded, setBioExpanded] = useState(false)
+    const [skillsExpanded, setSkillsExpanded] = useState(false)
+    const [expListExpanded, setExpListExpanded] = useState(false)
+    const [eduListExpanded, setEduListExpanded] = useState(false)
+    const [projListExpanded, setProjListExpanded] = useState(false)
+    const [refListExpanded, setRefListExpanded] = useState(false)
+    const [expExpanded, setExpExpanded] = useState<Record<number, boolean>>({})
+    const [eduExpanded, setEduExpanded] = useState<Record<number, boolean>>({})
+    const [projExpanded, setProjExpanded] = useState<Record<number, boolean>>({})
+    const [refExpanded, setRefExpanded] = useState<Record<number, boolean>>({})
+
+    const clampStyle = (lines = 5) => ({
+      display: '-webkit-box',
+      WebkitBoxOrient: 'vertical' as const,
+      WebkitLineClamp: lines,
+      overflow: 'hidden',
+    })
+
+    const normalizeDisplayText = (s: string) =>
+      String(s || '')
+        .replace(/\r/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+
+    const openSocial = (url: string) => {
+      const u = String(url || '').trim()
+      if (!u) return
+      const href = /^https?:\/\//i.test(u) ? u : `https://${u.replace(/^\/+/, '')}`
+      window.open(href, '_blank')
+    }
+
+    return (
+      <div className="min-h-[70vh] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-800 text-white">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/40">
+          <div className="h-44 md:h-56 bg-slate-900 relative">
+            {bannerUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={bannerUrl} alt="Banner" className="w-full h-full object-cover opacity-80" />
+            ) : (
+              <div className="w-full h-full bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(16,185,129,0.25),transparent_45%)]" />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/10 to-transparent" />
+          </div>
+          <div className="p-6 md:p-8">
+            <div className="flex flex-col md:flex-row md:items-end gap-5">
+              <div className="-mt-16 md:-mt-20 shrink-0">
+                <div className="w-24 h-24 md:w-28 md:h-28 rounded-3xl overflow-hidden border border-white/10 bg-white/5 shadow-xl">
+                  {avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center font-bold text-2xl">
+                      {(portfolio.name || 'T').slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="min-w-0">
+                  <h1 className="text-2xl md:text-3xl font-bold truncate">{portfolio.name || 'Your Name'}</h1>
+                  <p className="text-slate-300 mt-1">{portfolio.title || 'Your Title'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid lg:grid-cols-12 gap-6 mt-6">
+          <div className="lg:col-span-8 space-y-6">
+            <section className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+              <h2 className="text-xl font-semibold mb-4">About</h2>
+              <div className="text-slate-300 whitespace-pre-wrap" style={bioExpanded ? undefined : clampStyle(5)}>
+                {normalizeDisplayText(portfolio.bio) || 'Add a short bio…'}
+              </div>
+              {normalizeDisplayText(portfolio.bio).length > 0 ? (
+                <button
+                  type="button"
+                  className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                  onClick={() => setBioExpanded((v) => !v)}
+                >
+                  {bioExpanded ? 'Show less' : 'Show more'}
+                </button>
+              ) : null}
+            </section>
+
+            {introPreviewUrl ? (
+              <section className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                <h2 className="text-xl font-semibold mb-4">Introduction Video</h2>
+                <div className="mx-auto max-w-3xl">
+                  <div className="rounded-3xl p-[1px] bg-gradient-to-br from-white/15 via-white/5 to-transparent shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+                    <div className="rounded-3xl overflow-hidden bg-slate-950/60 border border-white/10">
+                      <div className="bg-black">
+                        <video src={introPreviewUrl} controls playsInline className="w-full max-h-[280px] object-contain" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {order.map((k) => {
+              if (k === 'intro' || k === 'social') return null
+              // Projects is intentionally rendered in the right column under "Connect With Me"
+              if (k === 'projects') return null
+              if (k === 'skills') {
+                const collapsed = (portfolio.skills || []).slice(0, 20)
+                const show = skillsExpanded ? (portfolio.skills || []) : collapsed
+                return (
+                  <section key={k} className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <h2 className="text-xl font-semibold mb-4">Skills</h2>
+                    <div className="flex flex-wrap gap-2">
+                      {show.map((s, idx) => (
+                        <span key={`${s}-${idx}`} className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-200 text-sm">
+                          {s}
+                        </span>
+                      ))}
+                      {!portfolio.skills?.length ? <div className="text-slate-400 text-sm">No skills yet.</div> : null}
+                    </div>
+                    {(portfolio.skills || []).length > collapsed.length ? (
+                      <button
+                        type="button"
+                        className="mt-3 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                        onClick={() => setSkillsExpanded((v) => !v)}
+                      >
+                        {skillsExpanded ? 'Show less' : 'Show more'}
+                      </button>
+                    ) : null}
+                  </section>
+                )
+              }
+              if (k === 'experience') {
+                const list = expListExpanded ? (portfolio.experience || []) : (portfolio.experience || []).slice(0, 2)
+                return (
+                  <section key={k} className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <h2 className="text-xl font-semibold mb-4">Experience</h2>
+                    {list.map((e, idx) => (
+                      <div key={idx} className="rounded-xl border border-white/10 bg-slate-900/40 p-4 mb-3">
+                        <div className="font-semibold">{e.title || 'Role'}</div>
+                        <div className="text-slate-300 text-sm mt-1">{e.company || 'Company'}</div>
+                        {normalizeDisplayText(e.description || '') ? (
+                          <div className="mt-3">
+                            <div className="text-slate-300 text-sm whitespace-pre-wrap" style={expExpanded[idx] ? undefined : clampStyle(5)}>
+                              {normalizeDisplayText(e.description || '')}
+                            </div>
+                            <button
+                              type="button"
+                              className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                              onClick={() => setExpExpanded((p) => ({ ...p, [idx]: !p[idx] }))}
+                            >
+                              {expExpanded[idx] ? 'Show less' : 'Show more'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                    {!portfolio.experience?.length ? <div className="text-slate-400 text-sm">No experience yet.</div> : null}
+                    {(portfolio.experience || []).length > 2 ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                        onClick={() => setExpListExpanded((v) => !v)}
+                      >
+                        {expListExpanded ? 'Show fewer roles' : 'Show all roles'}
+                      </button>
+                    ) : null}
+                  </section>
+                )
+              }
+              if (k === 'education') {
+                const list = eduListExpanded ? (portfolio.education || []) : (portfolio.education || []).slice(0, 2)
+                return (
+                  <section key={k} className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <h2 className="text-xl font-semibold mb-4">Education</h2>
+                    {list.map((e, idx) => (
+                      <div key={idx} className="rounded-xl border border-white/10 bg-slate-900/40 p-4 mb-3">
+                        <div className="font-semibold">{e.degree || 'Qualification'}</div>
+                        <div className="text-slate-300 text-sm mt-1">{e.institution || 'Institution'}</div>
+                        {normalizeDisplayText(String((e as any)?.notes || '')) ? (
+                          <div className="mt-3">
+                            <div className="text-slate-300 text-sm whitespace-pre-wrap" style={eduExpanded[idx] ? undefined : clampStyle(5)}>
+                              {normalizeDisplayText(String((e as any)?.notes || ''))}
+                            </div>
+                            <button
+                              type="button"
+                              className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                              onClick={() => setEduExpanded((p) => ({ ...p, [idx]: !p[idx] }))}
+                            >
+                              {eduExpanded[idx] ? 'Show less' : 'Show more'}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                    {!portfolio.education?.length ? <div className="text-slate-400 text-sm">No education yet.</div> : null}
+                    {(portfolio.education || []).length > 2 ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                        onClick={() => setEduListExpanded((v) => !v)}
+                      >
+                        {eduListExpanded ? 'Show fewer entries' : 'Show all education'}
+                      </button>
+                    ) : null}
+                  </section>
+                )
+              }
+              if (k === 'attachments') {
+                return (
+                  <section key={k} className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <h2 className="text-xl font-semibold mb-4">Attachments</h2>
+                    {Array.isArray(portfolio.attachments) && portfolio.attachments.length ? (
+                      <div className="space-y-2">
+                        {portfolio.attachments.slice(0, 6).map((a) => (
+                          <div key={a.id} className="rounded-xl border border-white/10 bg-slate-900/40 p-3 flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm text-slate-200 truncate">{a.title}</div>
+                              <div className="text-xs text-slate-400 truncate">{a.item_type}</div>
+                            </div>
+                            {a.file_path ? (
+                              <button type="button" className="text-xs text-blue-300 underline" onClick={() => openFilePath(a.file_path!)}>
+                                Open
+                              </button>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-slate-400 text-sm">No attachments yet.</div>
+                    )}
+                  </section>
+                )
+              }
+              if (k === 'referees') {
+                const list = refListExpanded ? (portfolio.referees || []) : (portfolio.referees || []).slice(0, 2)
+                return (
+                  <section key={k} className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <h2 className="text-xl font-semibold mb-4">Referees</h2>
+                    {list.length ? (
+                      <div className="space-y-3">
+                        {list.map((r, idx) => (
+                          <div key={idx} className="rounded-xl border border-white/10 bg-slate-900/40 p-4">
+                            <div className="font-semibold">{r.name || 'Referee'}</div>
+                            <div className="text-slate-300 text-sm mt-1">
+                              {(r.title ? `${r.title} • ` : '') + (r.company ? `${r.company} • ` : '') + (r.relationship ? r.relationship : '')}
+                            </div>
+                            {normalizeDisplayText(r.notes || '') ? (
+                              <div className="mt-3">
+                                <div className="text-slate-300 text-sm whitespace-pre-wrap" style={refExpanded[idx] ? undefined : clampStyle(5)}>
+                                  {normalizeDisplayText(r.notes || '')}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                                  onClick={() => setRefExpanded((p) => ({ ...p, [idx]: !p[idx] }))}
+                                >
+                                  {refExpanded[idx] ? 'Show less' : 'Show more'}
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-slate-400 text-sm">No referees yet.</div>
+                    )}
+                    {(portfolio.referees || []).length > 2 ? (
+                      <button
+                        type="button"
+                        className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                        onClick={() => setRefListExpanded((v) => !v)}
+                      >
+                        {refListExpanded ? 'Show fewer referees' : 'Show all referees'}
+                      </button>
+                    ) : null}
+                  </section>
+                )
+              }
+              return null
+            })}
+          </div>
+
+          <aside className="lg:col-span-4 space-y-6">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+              <div className="text-slate-200 font-semibold mb-4">Connect With Me</div>
+              {social.length ? (
+                <div className="space-y-2">
+                  {social.slice(0, 8).map((s, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="w-full text-left px-3 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10"
+                      onClick={() => openSocial(String(s.url))}
+                    >
+                      <div className="text-sm font-semibold text-slate-200">{String(s.platform)}</div>
+                      <div className="text-xs text-slate-400 break-all">{String(s.url)}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-slate-400 text-sm">No social links yet.</div>
+              )}
+            </div>
+
+            {/* Projects under Connect With Me (to fill the right column beside Intro Video) */}
+            <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-slate-200 font-semibold">Projects</div>
+                {(portfolio.projects || []).length > 2 ? (
+                  <button
+                    type="button"
+                    className="text-blue-300 hover:text-blue-200 text-sm font-medium"
+                    onClick={() => setProjListExpanded((v) => !v)}
+                  >
+                    {projListExpanded ? 'Show less' : 'Show all'}
+                  </button>
+                ) : null}
+              </div>
+
+              {(portfolio.projects || []).length ? (
+                <div className="space-y-3">
+                  {(projListExpanded ? (portfolio.projects || []) : (portfolio.projects || []).slice(0, 2)).map((p, idx) => (
+                    <div key={idx} className="rounded-xl border border-white/10 bg-slate-900/40 p-4">
+                      <div className="font-semibold">{p.name || 'Project'}</div>
+                      {p.url ? (
+                        <div className="text-blue-300 text-sm mt-1 break-all">{p.url}</div>
+                      ) : null}
+                      {normalizeDisplayText(p.description || '') ? (
+                        <div className="mt-3">
+                          <div className="text-slate-300 text-sm whitespace-pre-wrap" style={projExpanded[idx] ? undefined : clampStyle(5)}>
+                            {normalizeDisplayText(p.description || '')}
+                          </div>
+                          <button
+                            type="button"
+                            className="mt-2 text-blue-300 hover:text-blue-200 text-sm font-medium"
+                            onClick={() => setProjExpanded((q) => ({ ...q, [idx]: !q[idx] }))}
+                          >
+                            {projExpanded[idx] ? 'Show less' : 'Show more'}
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {Array.isArray((p as any)?.attachmentIds) && (p as any).attachmentIds.length ? (
+                        <div className="mt-4">
+                          <div className="text-xs text-slate-400 mb-2">
+                            Attached files: <span className="text-slate-200 font-semibold">{(p as any).attachmentIds.length}</span>
+                          </div>
+                          <div className="space-y-2">
+                            {(p as any).attachmentIds.slice(0, 3).map((id: any) => (
+                              <ProjectAttachmentChip key={id} id={Number(id)} onRemove={() => {}} />
+                            ))}
+                            {(p as any).attachmentIds.length > 3 ? (
+                              <div className="text-xs text-slate-400 px-1">+{(p as any).attachmentIds.length - 3} more…</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-slate-400 text-sm">No projects yet.</div>
+              )}
+            </div>
+          </aside>
+        </div>
+      </div>
+    )
+  }
 
   async function log(message: string, hypothesisId: string, data: any) {
     fetch('/api/debug/log', {
@@ -134,34 +660,61 @@ export default function PortfolioEditor() {
 
   const anySectionEditing = useMemo(() => Object.values(sectionEdit).some(Boolean), [sectionEdit])
 
-  async function ensureUsersRow(userId: string) {
+  async function ensureUsersRow(userId: string): Promise<boolean> {
     // Talent Bank schema FK requires public.users(id) exist with a non-null role.
+    // This function attempts to create/upsert a row in public.users for the current user.
     try {
-      const candidates: Array<Record<string, any>> = [
-        { id: userId, role: 'talent', email: null },
-        { id: userId, user_type: 'talent', email: null },
-        { id: userId, type: 'talent', email: null },
-        { id: userId, email: null },
-        { id: userId },
-        { user_id: userId, role: 'talent', email: null },
-        { user_id: userId, user_type: 'talent', email: null },
-        { user_id: userId, type: 'talent', email: null },
-        { user_id: userId, email: null },
-        { user_id: userId },
-      ]
-
-      for (const payload of candidates) {
-        const res = await supabase.from('users').upsert(payload as any)
-        if (!res.error) return
-        const msg = String((res.error as any)?.message ?? '')
-        const code = String((res.error as any)?.code ?? '')
-        const isMissingCol = code === 'PGRST204' || /Could not find the .* column/i.test(msg)
-        if (isMissingCol) continue
-        // RLS or other errors: stop spamming retries
-        return
+      const isMissingColErr = (err: any) => {
+        const msg = String(err?.message ?? '')
+        const code = String(err?.code ?? '')
+        return code === 'PGRST204' || /Could not find the .* column/i.test(msg)
       }
-    } catch {
-      // ignore
+
+      // Determine which self column exists (id vs user_id) with minimal noise.
+      let selfCol: 'id' | 'user_id' = 'id'
+      const checkId = await supabase.from('users').select('id').eq('id', userId).maybeSingle()
+      if (checkId.error && isMissingColErr(checkId.error)) {
+        selfCol = 'user_id'
+      } else if (!checkId.error && checkId.data) {
+        return true
+      }
+
+      if (selfCol === 'user_id') {
+        const checkUserId = await supabase.from('users').select('user_id').eq('user_id', userId).maybeSingle()
+        if (!checkUserId.error && checkUserId.data) return true
+      }
+
+      // Try the single supported upsert for the detected schema.
+      if (selfCol === 'id') {
+        const res = await supabase.from('users').upsert({ id: userId } as any, { onConflict: 'id' })
+        if (!res.error) return true
+        if (isMissingColErr(res.error)) {
+          const r2 = await supabase.from('users').upsert({ user_id: userId } as any, { onConflict: 'user_id' as any })
+          if (!r2.error) return true
+        }
+      } else {
+        const res = await supabase.from('users').upsert({ user_id: userId } as any, { onConflict: 'user_id' as any })
+        if (!res.error) return true
+        if (isMissingColErr(res.error)) {
+          const r2 = await supabase.from('users').upsert({ id: userId } as any, { onConflict: 'id' })
+          if (!r2.error) return true
+        }
+      }
+      
+      // If all attempts failed, check if it's an RLS issue
+      const lastError = await supabase.from('users').select('id').eq('id', userId).maybeSingle()
+      if (lastError.error) {
+        const errorMsg = String((lastError.error as any)?.message ?? '')
+        if (errorMsg.includes('policy') || errorMsg.includes('RLS') || errorMsg.includes('row-level security')) {
+          console.error('RLS policy issue: Migration 2025122208_users_self_row.sql may not have been run')
+          return false
+        }
+      }
+      
+      return false
+    } catch (error) {
+      console.error('ensureUsersRow exception:', error)
+      return false
     }
   }
 
@@ -210,6 +763,22 @@ export default function PortfolioEditor() {
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
+  async function ensureTbItem(id: number) {
+    if (!id) return
+    if (tbItemCache[id]) return
+    const uid = await getUserId()
+    if (!uid) return
+    const { data } = await supabase
+      .from('talent_bank_items')
+      .select('id,item_type,title,metadata,file_path,file_type,created_at')
+      .eq('user_id', uid)
+      .eq('id', id)
+      .maybeSingle()
+    if (data?.id) {
+      setTbItemCache((prev) => ({ ...prev, [id]: data as any }))
+    }
+  }
+
   function ThumbIcon({ label }: { label: string }) {
     return (
       <div className="w-[20mm] h-[20mm] rounded-lg border border-gray-300 bg-gray-50 overflow-hidden flex items-center justify-center">
@@ -217,6 +786,93 @@ export default function PortfolioEditor() {
           {label}
         </div>
       </div>
+    )
+  }
+
+  function MetaThumb({ kind, title }: { kind: string; title: string }) {
+    const k = String(kind || '').toLowerCase()
+    const badge =
+      k === 'experience' ? 'EXP' :
+      k === 'education' ? 'EDU' :
+      k === 'credential' ? 'CERT' :
+      k === 'social' ? 'SOC' :
+      k === 'project' ? 'PROJ' :
+      'ITEM'
+    const icon =
+      k === 'experience' ? '💼' :
+      k === 'education' ? '🎓' :
+      k === 'credential' ? '🏅' :
+      k === 'social' ? '🔗' :
+      k === 'project' ? '🧩' :
+      '📄'
+
+    return (
+      <div className="w-[20mm] h-[20mm] rounded-lg border border-gray-300 bg-gradient-to-br from-gray-50 to-white overflow-hidden flex items-center justify-center shrink-0">
+        <div className="text-center px-2">
+          <div className="text-lg leading-none">{icon}</div>
+          <div className="mt-1 inline-flex items-center px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-semibold text-gray-700">
+            {badge}
+          </div>
+          <div className="mt-1 text-[9px] text-gray-500 truncate max-w-[18mm]">{String(title || '').slice(0, 18)}</div>
+        </div>
+      </div>
+    )
+  }
+
+  function PdfThumb({ url, title, onClick }: { url: string; title: string; onClick: () => void }) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)
+    const [err, setErr] = useState<string | null>(null)
+
+    useEffect(() => {
+      let cancelled = false
+      async function render() {
+        try {
+          setErr(null)
+          const pdfjsLib: any = await loadPdfJsLib()
+
+          const loadingTask = pdfjsLib.getDocument({ url })
+          const pdf = await loadingTask.promise
+          const page = await pdf.getPage(1)
+
+          const canvas = canvasRef.current
+          if (!canvas || cancelled) return
+          const ctx = canvas.getContext('2d')
+          if (!ctx) return
+
+          const baseViewport = page.getViewport({ scale: 1 })
+          const targetPx = 90 // roughly fits 20mm thumbnail
+          const scale = targetPx / baseViewport.width
+          const viewport = page.getViewport({ scale })
+
+          canvas.width = Math.floor(viewport.width)
+          canvas.height = Math.floor(viewport.height)
+
+          await page.render({ canvasContext: ctx, viewport }).promise
+        } catch (e: any) {
+          if (!cancelled) setErr(e?.message ?? String(e))
+        }
+      }
+      render()
+      return () => {
+        cancelled = true
+      }
+    }, [url])
+
+    return (
+      <button
+        type="button"
+        className="w-[20mm] h-[20mm] rounded-lg border border-gray-300 overflow-hidden bg-white shrink-0"
+        onClick={onClick}
+        title={title || 'Open PDF'}
+      >
+        <div className="w-full h-full flex items-center justify-center bg-gray-50">
+          {err ? (
+            <div className="text-[9px] text-gray-500">PDF</div>
+          ) : (
+            <canvas ref={canvasRef} className="w-full h-full object-contain" />
+          )}
+        </div>
+      </button>
     )
   }
 
@@ -269,11 +925,12 @@ export default function PortfolioEditor() {
   function renderImportThumb(item: TalentBankItem) {
     const isImg = item.file_type?.startsWith('image') || item.item_type === 'image'
     const isVid = item.file_type?.startsWith('video') || item.item_type === 'video'
+    const isPdf = item.file_type?.includes('pdf') || fileExt(item.title) === 'pdf'
     const ext = fileExt(item.title)
     const label = isImg ? 'IMG' : isVid ? 'VID' : ext ? ext.toUpperCase().slice(0, 4) : 'FILE'
 
     const path = item.file_path || ''
-    if (path && (isImg || isVid) && !thumbUrls[path]) {
+    if (path && (isImg || isVid || isPdf) && !thumbUrls[path]) {
       ensureSignedUrl(path).catch(() => {})
     }
     const url = path ? thumbUrls[path] : null
@@ -300,6 +957,15 @@ export default function PortfolioEditor() {
       )
     }
 
+    if (url && isPdf) {
+      return <PdfThumb url={url} title={item.title} onClick={() => openFilePath(path)} />
+    }
+
+    // Structured items without files: show a clear card thumbnail.
+    if (!path && (item.item_type === 'experience' || item.item_type === 'education' || item.item_type === 'credential' || item.item_type === 'social' || item.item_type === 'project')) {
+      return <MetaThumb kind={item.item_type} title={item.title} />
+    }
+
     // Documents/other: icon thumbnail; clicking opens the file if available.
     if (path) {
       return (
@@ -318,6 +984,111 @@ export default function PortfolioEditor() {
         </div>
       </div>
     )
+  }
+
+  function ProjectAttachmentChip({ id, onRemove }: { id: number; onRemove: () => void }) {
+    const item = tbItemCache[id]
+
+    useEffect(() => {
+      if (!item) ensureTbItem(id).catch(() => {})
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id])
+
+    useEffect(() => {
+      if (item?.file_path && !thumbUrls[item.file_path]) {
+        ensureSignedUrl(item.file_path).catch(() => {})
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [item?.file_path])
+
+    if (!item) {
+      return (
+        <div className="flex items-center gap-2 px-2 py-2 rounded-lg border border-white/10 bg-slate-900/30">
+          <ThumbIcon label="…" />
+          <div className="text-xs text-slate-400">Loading…</div>
+        </div>
+      )
+    }
+
+    const open = () => {
+      if (item.file_path) {
+        openFilePath(item.file_path).catch(() => {})
+        return
+      }
+      if (item.item_type === 'social') {
+        const u = (item.metadata as any)?.url ?? ''
+        if (u) window.open(String(u).startsWith('http') ? String(u) : `https://${u}`, '_blank')
+      }
+    }
+
+    return (
+      <div className="flex items-center gap-3 px-2 py-2 rounded-xl border border-white/10 bg-slate-900/30">
+        {renderImportThumb(item)}
+        <div className="min-w-0">
+          <div className="text-sm text-slate-200 truncate">{item.title}</div>
+          <div className="text-xs text-slate-400 truncate">{item.item_type}</div>
+          <div className="mt-1 flex items-center gap-3 text-xs">
+            <button type="button" className="text-blue-300 underline" onClick={open}>
+              Open
+            </button>
+            <button type="button" className="text-red-300 underline" onClick={onRemove}>
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  function toTenWords(s: string) {
+    const words = String(s || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean)
+    if (words.length <= 10) return words.join(' ')
+    return words.slice(0, 10).join(' ') + '…'
+  }
+
+  function itemSummary(item: TalentBankItem) {
+    const t = String(item.item_type || '').toLowerCase()
+    const m: any = item.metadata ?? {}
+    if (t === 'experience') {
+      const role = m?.title || m?.role || ''
+      const company = m?.company || ''
+      const desc = m?.description || m?.summary || ''
+      return toTenWords([role, company, desc].filter(Boolean).join(' — '))
+    }
+    if (t === 'education') {
+      const inst = m?.institution || ''
+      const degree = m?.degree || m?.course || ''
+      const year = m?.year || m?.endDate || ''
+      return toTenWords([inst, degree, year].filter(Boolean).join(' — '))
+    }
+    if (t === 'credential' || t === 'certification' || t === 'license') {
+      const name = m?.name || item.title || ''
+      const issuer = m?.issuer || ''
+      const expiry = m?.expiry || ''
+      return toTenWords([name, issuer, expiry].filter(Boolean).join(' — '))
+    }
+    if (t === 'social') {
+      const platform = m?.platform || ''
+      const url = m?.url || ''
+      return toTenWords([platform, url].filter(Boolean).join(' '))
+    }
+    if (t === 'project') {
+      const name = m?.name || item.title || ''
+      const desc = m?.description || ''
+      return toTenWords([name, desc].filter(Boolean).join(' — '))
+    }
+    if (t === 'referee' || t === 'referees' || t === 'reference') {
+      const name = m?.name || item.title || ''
+      const rel = m?.relationship || ''
+      const company = m?.company || ''
+      return toTenWords([name, rel, company].filter(Boolean).join(' — '))
+    }
+    const content = m?.description || m?.notes || item.title || ''
+    return toTenWords(String(content))
   }
 
   async function loadSavedPortfolio() {
@@ -339,25 +1110,52 @@ export default function PortfolioEditor() {
 
       const saved = data?.[0]?.metadata
       if (saved && typeof saved === 'object') {
-        setPortfolio((prev) => ({
-          ...prev,
-          ...saved,
-          // ensure required fields exist
-          skills: Array.isArray(saved.skills) ? saved.skills : prev.skills,
-          experience: Array.isArray(saved.experience) ? saved.experience : prev.experience,
-          education: Array.isArray(saved.education) ? saved.education : prev.education,
-          attachments: Array.isArray(saved.attachments) ? saved.attachments : prev.attachments,
-          projects: Array.isArray(saved.projects)
-            ? saved.projects.map((p: any) => ({
-                name: p?.name ?? '',
-                description: p?.description ?? '',
-                url: p?.url ?? '',
-                attachmentIds: Array.isArray(p?.attachmentIds) ? p.attachmentIds : [],
-              }))
-            : prev.projects,
-          sectionOrder: Array.isArray(saved.sectionOrder) ? saved.sectionOrder : prev.sectionOrder,
-          introVideoId: typeof saved.introVideoId === 'number' ? saved.introVideoId : (saved.introVideoId == null ? null : prev.introVideoId),
-        }))
+        setPortfolio((prev) => {
+          // migrate older portfolios by appending missing sections (e.g., referees, social)
+          const savedOrder = Array.isArray((saved as any).sectionOrder) ? (saved as any).sectionOrder.map((x: any) => String(x)) : null
+          const mergedOrder = savedOrder ? [...savedOrder] : [...(prev.sectionOrder ?? DEFAULT_SECTION_ORDER)]
+          for (const k of DEFAULT_SECTION_ORDER) {
+            const kk = String(k)
+            if (!mergedOrder.includes(kk)) mergedOrder.push(kk)
+          }
+
+          return {
+            ...prev,
+            ...saved,
+            // ensure required fields exist
+            socialLinks: Array.isArray((saved as any).socialLinks)
+              ? (saved as any).socialLinks
+                  .map((s: any) => ({ platform: String(s?.platform ?? ''), url: String(s?.url ?? '') }))
+                  .filter((s: any) => s.platform.trim() && s.url.trim())
+              : prev.socialLinks,
+            skills: Array.isArray(saved.skills) ? saved.skills : prev.skills,
+            experience: Array.isArray(saved.experience) ? saved.experience : prev.experience,
+            education: Array.isArray(saved.education) ? saved.education : prev.education,
+            referees: Array.isArray(saved.referees)
+              ? saved.referees.map((r: any) => ({
+                  name: r?.name ?? '',
+                  relationship: r?.relationship ?? '',
+                  company: r?.company ?? '',
+                  title: r?.title ?? '',
+                  email: r?.email ?? '',
+                  phone: r?.phone ?? '',
+                  notes: r?.notes ?? '',
+                }))
+              : prev.referees,
+            attachments: Array.isArray(saved.attachments) ? saved.attachments : prev.attachments,
+            projects: Array.isArray(saved.projects)
+              ? saved.projects.map((p: any) => ({
+                  name: p?.name ?? '',
+                  description: p?.description ?? '',
+                  url: p?.url ?? '',
+                  attachmentIds: Array.isArray(p?.attachmentIds) ? p.attachmentIds : [],
+                }))
+              : prev.projects,
+            sectionOrder: mergedOrder,
+            introVideoId:
+              typeof saved.introVideoId === 'number' ? saved.introVideoId : (saved.introVideoId == null ? null : prev.introVideoId),
+          }
+        })
       }
 
       await ensureMediaUrl('avatar', (saved as any)?.avatar_path)
@@ -523,10 +1321,32 @@ export default function PortfolioEditor() {
             '',
       }))
 
+      const mappedProjects = selected
+        .filter((i) => i.item_type === 'project')
+        .map((item) => ({
+          name: String(item.metadata?.name || item.title || '').trim() || 'Project',
+          description: String(item.metadata?.description || item.metadata?.summary || '').trim(),
+          url: String(item.metadata?.url || item.metadata?.link || '').trim(),
+          attachmentIds: Array.isArray(item.metadata?.attachmentIds) ? item.metadata.attachmentIds : [],
+        }))
+        .filter((p) => p.name)
+
       setPortfolio((prev) => ({
         ...prev,
         experience: mappedExperience.length ? [...prev.experience, ...mappedExperience] : prev.experience,
         education: mappedEducation.length ? [...prev.education, ...mappedEducation] : prev.education,
+        projects: mappedProjects.length
+          ? (() => {
+              const existing = Array.isArray(prev.projects) ? prev.projects : []
+              const next = [...existing]
+              for (const p of mappedProjects) {
+                const url = String(p.url || '').trim()
+                if (url && next.some((x) => String(x?.url || '').trim().toLowerCase() === url.toLowerCase())) continue
+                next.push(p)
+              }
+              return next
+            })()
+          : prev.projects,
         attachments: attachmentsToAdd.length ? [...prev.attachments, ...attachmentsToAdd] : prev.attachments,
       }))
 
@@ -556,6 +1376,11 @@ export default function PortfolioEditor() {
     })
   }
 
+  const removeExperience = (index: number) => {
+    if (!sectionEdit.experience) return
+    setPortfolio((prev) => ({ ...prev, experience: prev.experience.filter((_, i) => i !== index) }))
+  }
+
   const addExperience = () => {
     if (!sectionEdit.experience) return
     setPortfolio({
@@ -569,52 +1394,185 @@ export default function PortfolioEditor() {
 
   const updateExperience = (index: number, field: string, value: string) => {
     if (!sectionEdit.experience) return
-    const updated = [...portfolio.experience]
-    updated[index] = { ...updated[index], [field]: value }
-    setPortfolio({ ...portfolio, experience: updated })
+    setPortfolio((prev) => {
+      const updated = [...prev.experience]
+      updated[index] = { ...updated[index], [field]: value }
+      return { ...prev, experience: updated }
+    })
+  }
+
+  const bulkCount = (m: Record<string, boolean>) => Object.values(m).filter(Boolean).length
+  const bulkIsAllSelected = (keys: string[], m: Record<string, boolean>) => keys.length > 0 && keys.every((k) => !!m[k])
+  const bulkToggleKey = (section: BulkSection, key: string, checked: boolean) => {
+    setBulkSel((prev) => ({
+      ...prev,
+      [section]: { ...prev[section], [key]: checked },
+    }))
+  }
+  const bulkSetAll = (section: BulkSection, keys: string[], checked: boolean) => {
+    setBulkSel((prev) => ({
+      ...prev,
+      [section]: checked ? Object.fromEntries(keys.map((k) => [k, true])) : {},
+    }))
+  }
+  const bulkClear = (section: BulkSection) => {
+    setBulkSel((prev) => ({ ...prev, [section]: {} }))
+  }
+  const bulkDeleteSelected = (section: BulkSection) => {
+    if (!sectionEdit[section]) return
+    const sel = bulkSel[section]
+    const count = bulkCount(sel)
+    if (count === 0) return
+    const ok = window.confirm(`Delete ${count} item(s) from ${section}? This cannot be undone.`)
+    if (!ok) return
+
+    if (section === 'skills') {
+      setPortfolio((p) => ({ ...p, skills: p.skills.filter((_, i) => !sel[String(i)]) }))
+    } else if (section === 'experience') {
+      setPortfolio((p) => ({ ...p, experience: p.experience.filter((_, i) => !sel[String(i)]) }))
+    } else if (section === 'education') {
+      setPortfolio((p) => ({ ...p, education: p.education.filter((_, i) => !sel[String(i)]) }))
+    } else if (section === 'referees') {
+      setPortfolio((p) => ({ ...p, referees: p.referees.filter((_, i) => !sel[String(i)]) }))
+    } else if (section === 'attachments') {
+      setPortfolio((p) => ({ ...p, attachments: p.attachments.filter((a) => !sel[String(a.id)]) }))
+    } else if (section === 'projects') {
+      setPortfolio((p) => ({ ...p, projects: p.projects.filter((_, i) => !sel[String(i)]) }))
+    }
+
+    bulkClear(section)
   }
 
   const addEducation = () => {
     if (!sectionEdit.education) return
-    setPortfolio({
-      ...portfolio,
-      education: [
-        ...portfolio.education,
-        { institution: '', degree: '', field: '', year: '' }
-      ]
-    })
+    setPortfolio((prev) => ({
+      ...prev,
+      education: [...prev.education, { institution: '', degree: '', field: '', year: '' }],
+    }))
   }
 
   const updateEducation = (index: number, field: string, value: string) => {
     if (!sectionEdit.education) return
-    const updated = [...portfolio.education]
-    updated[index] = { ...updated[index], [field]: value }
-    setPortfolio({ ...portfolio, education: updated })
+    setPortfolio((prev) => {
+      const updated = [...prev.education]
+      updated[index] = { ...updated[index], [field]: value }
+      return { ...prev, education: updated }
+    })
   }
 
   const removeEducation = (index: number) => {
     if (!sectionEdit.education) return
-    setPortfolio({ ...portfolio, education: portfolio.education.filter((_, i) => i !== index) })
+    setPortfolio((prev) => ({ ...prev, education: prev.education.filter((_, i) => i !== index) }))
   }
 
   const addProject = () => {
     if (!sectionEdit.projects) return
-    setPortfolio({
-      ...portfolio,
-      projects: [...portfolio.projects, { name: '', description: '', url: '', attachmentIds: [] }]
-    })
+    setPortfolio((prev) => ({
+      ...prev,
+      projects: [...prev.projects, { name: '', description: '', url: '', attachmentIds: [] }],
+    }))
   }
 
   const updateProject = (index: number, field: string, value: string) => {
     if (!sectionEdit.projects) return
-    const updated = [...portfolio.projects]
-    updated[index] = { ...updated[index], [field]: value }
-    setPortfolio({ ...portfolio, projects: updated })
+    setPortfolio((prev) => {
+      const updated = [...prev.projects]
+      updated[index] = { ...updated[index], [field]: value }
+      return { ...prev, projects: updated }
+    })
   }
 
   const removeProject = (index: number) => {
     if (!sectionEdit.projects) return
-    setPortfolio({ ...portfolio, projects: portfolio.projects.filter((_, i) => i !== index) })
+    setPortfolio((prev) => ({ ...prev, projects: prev.projects.filter((_, i) => i !== index) }))
+  }
+
+  const addSocialLink = () => {
+    if (!sectionEdit.social) return
+    setPortfolio((p) => ({
+      ...p,
+      socialLinks: [...(p.socialLinks || []), { platform: 'LinkedIn', url: '' }],
+    }))
+  }
+
+  const updateSocialLink = (index: number, field: 'platform' | 'url', value: string) => {
+    if (!sectionEdit.social) return
+    setPortfolio((p) => {
+      const next = [...(p.socialLinks || [])]
+      next[index] = { ...next[index], [field]: value }
+      return { ...p, socialLinks: next }
+    })
+  }
+
+  const removeSocialLink = (index: number) => {
+    if (!sectionEdit.social) return
+    setPortfolio((p) => ({ ...p, socialLinks: (p.socialLinks || []).filter((_, i) => i !== index) }))
+  }
+
+  async function saveSocialLinksToTalentBank() {
+    try {
+      const uid = await getUserId()
+      if (!uid) {
+        alert('Please sign in first.')
+        return
+      }
+      await ensureUsersRow(uid)
+
+      const links = (portfolio.socialLinks || []).map((s) => ({
+        platform: String(s.platform || '').trim(),
+        url: String(s.url || '').trim(),
+      })).filter((s) => s.platform && s.url)
+
+      if (!links.length) {
+        alert('No social links to save.')
+        return
+      }
+
+      for (const s of links) {
+        // Insert as individual Talent Bank items so users can attach notes later.
+        const title = s.platform
+        const metadata = { platform: s.platform, url: s.url }
+        const { error } = await supabase.from('talent_bank_items').insert({
+          user_id: uid,
+          item_type: 'social',
+          title,
+          metadata,
+          is_public: false,
+        } as any)
+        if (error) {
+          console.warn('Social insert failed:', error)
+        }
+      }
+
+      alert(`Saved ${links.length} social link(s) to Talent Bank.`)
+    } catch (e: any) {
+      alert(`Failed to save social links: ${e?.message ?? String(e)}`)
+    }
+  }
+
+  const addReferee = () => {
+    if (!sectionEdit.referees) return
+    setPortfolio((p) => ({
+      ...p,
+      referees: [
+        ...p.referees,
+        { name: '', relationship: '', company: '', title: '', email: '', phone: '', notes: '' },
+      ],
+    }))
+  }
+
+  const updateReferee = (index: number, field: string, value: string) => {
+    if (!sectionEdit.referees) return
+    setPortfolio((p) => {
+      const next = [...p.referees]
+      next[index] = { ...next[index], [field]: value } as any
+      return { ...p, referees: next }
+    })
+  }
+
+  const removeReferee = (index: number) => {
+    if (!sectionEdit.referees) return
+    setPortfolio((p) => ({ ...p, referees: p.referees.filter((_, i) => i !== index) }))
   }
 
   async function openProjectImportModal(index: number) {
@@ -647,9 +1605,11 @@ export default function PortfolioEditor() {
         return
       }
 
+      // For Projects, only allow attaching file-based Talent Bank items (physical artifacts):
+      // images, videos, audio/podcasts, PDFs/docs, etc. (anything with a file_path).
       const filtered = (data ?? [])
         .filter((i: any) => i.item_type !== 'portfolio')
-        .filter((i: any) => !!i.file_path) // only files/media for projects
+        .filter((i: any) => !!i.file_path)
 
       setAvailableItems(filtered as any)
 
@@ -662,6 +1622,29 @@ export default function PortfolioEditor() {
     } finally {
       setIsImporting(false)
     }
+  }
+
+  async function openProjectImportFromHeader() {
+    if (!sectionEdit.projects) return
+    if (!portfolio.projects.length) {
+      alert('Add a project first, then import files from Talent Bank into it.')
+      return
+    }
+    const selectedIdx = Object.entries(bulkSel.projects)
+      .filter(([, v]) => !!v)
+      .map(([k]) => Number(k))
+      .filter((n) => Number.isFinite(n))
+
+    let target = 0
+    if (portfolio.projects.length === 1) {
+      target = 0
+    } else if (selectedIdx.length === 1) {
+      target = selectedIdx[0]
+    } else {
+      alert('Select exactly one Project (checkbox) first, then click “Import from Talent Bank”.')
+      return
+    }
+    await openProjectImportModal(target)
   }
 
   async function openIntroVideoModal() {
@@ -746,7 +1729,11 @@ export default function PortfolioEditor() {
         return false
       }
 
-      await ensureUsersRow(uid)
+      const usersRowExists = await ensureUsersRow(uid)
+      if (!usersRowExists) {
+        console.warn('Could not ensure users row exists. The migration 2025122208_users_self_row.sql may need to be run.')
+        // Continue anyway - the error will be caught below if FK constraint fails
+      }
 
       // Update existing portfolio item if present; otherwise insert a new one.
       const existing = await supabase
@@ -919,6 +1906,13 @@ export default function PortfolioEditor() {
             </Link>
             <button
               type="button"
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 font-semibold"
+              onClick={() => setLivePreviewOpen(true)}
+            >
+              Live Preview
+            </button>
+            <button
+              type="button"
               onClick={saveAndExit}
               disabled={savingExit}
               className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 font-semibold"
@@ -928,6 +1922,34 @@ export default function PortfolioEditor() {
           </div>
         </div>
       </header>
+
+      {livePreviewOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+          onClick={() => setLivePreviewOpen(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-full max-w-6xl bg-slate-950 border border-white/10 rounded-2xl overflow-hidden max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div className="font-semibold">Live Preview (unsaved)</div>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+                onClick={() => setLivePreviewOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <LivePreview />
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-4xl mx-auto px-8 py-10 space-y-6">
         <div className="flex items-end justify-between gap-3">
@@ -1089,7 +2111,7 @@ export default function PortfolioEditor() {
               type="text"
               placeholder="Full Name"
               value={portfolio.name}
-              onChange={(e) => setPortfolio({ ...portfolio, name: e.target.value })}
+              onChange={(e) => setPortfolio((prev) => ({ ...prev, name: e.target.value }))}
               disabled={!sectionEdit.basic}
               className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
             />
@@ -1097,19 +2119,112 @@ export default function PortfolioEditor() {
               type="text"
               placeholder="Professional Title"
               value={portfolio.title}
-              onChange={(e) => setPortfolio({ ...portfolio, title: e.target.value })}
+              onChange={(e) => setPortfolio((prev) => ({ ...prev, title: e.target.value }))}
               disabled={!sectionEdit.basic}
               className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
             />
-            <textarea
-              placeholder="Bio / Summary"
+            <CollapsibleTextarea
               value={portfolio.bio}
-              onChange={(e) => setPortfolio({ ...portfolio, bio: e.target.value })}
+              onChange={(e) => setPortfolio((prev) => ({ ...prev, bio: e.target.value }))}
+              placeholder="Bio / Summary"
               disabled={!sectionEdit.basic}
               className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
-              rows={4}
+              expandKey="bio"
+              expanded={!!expandedTextareas['bio']}
+              onToggle={toggleTextarea}
+              defaultRows={5}
             />
           </div>
+        </section>
+
+        {/* Social */}
+        <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Social</h2>
+            <div className="flex items-center gap-3">
+              {!sectionEdit.social ? (
+                <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, social: true }))}>
+                  Edit
+                </button>
+              ) : (
+                <button
+                  className="text-sm underline text-blue-300 disabled:opacity-60"
+                  disabled={savingSection === 'social'}
+                  onClick={() => saveSection('social')}
+                >
+                  {savingSection === 'social' ? 'Saving…' : 'Save'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={addSocialLink}
+                disabled={!sectionEdit.social}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-500 disabled:opacity-60"
+              >
+                Add social link
+              </button>
+              <button
+                type="button"
+                onClick={saveSocialLinksToTalentBank}
+                disabled={!sectionEdit.social || (portfolio.socialLinks || []).filter((s) => String(s?.url || '').trim()).length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-60"
+              >
+                Save to Talent Bank
+              </button>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-400 mb-4">
+            Pick a platform and paste your profile link. Supported top platforms: {SOCIAL_PLATFORMS.join(', ')}.
+          </div>
+
+          {portfolio.socialLinks.length === 0 ? (
+            <div className="text-sm text-slate-400">No social links added yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {portfolio.socialLinks.map((s, idx) => (
+                <div key={idx} className="p-4 border border-white/10 rounded-xl bg-slate-900/40">
+                  <div className="grid md:grid-cols-12 gap-2 items-center">
+                    <div className="md:col-span-3">
+                      <select
+                        value={s.platform}
+                        onChange={(e) => updateSocialLink(idx, 'platform', e.target.value)}
+                        disabled={!sectionEdit.social}
+                        className="w-full p-3 rounded bg-slate-900 border border-slate-700 text-white disabled:opacity-60"
+                      >
+                        {SOCIAL_PLATFORMS.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-8">
+                      <input
+                        type="url"
+                        placeholder="https://…"
+                        value={s.url}
+                        onChange={(e) => updateSocialLink(idx, 'url', e.target.value)}
+                        disabled={!sectionEdit.social}
+                        className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                      />
+                    </div>
+                    <div className="md:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => removeSocialLink(idx)}
+                        disabled={!sectionEdit.social}
+                        className="text-xs text-red-300 underline disabled:opacity-60"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Skills */}
@@ -1132,6 +2247,27 @@ export default function PortfolioEditor() {
               )}
             </div>
           </div>
+          {sectionEdit.skills && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.skills.map((_, i) => String(i)), bulkSel.skills)}
+                  onChange={(e) => bulkSetAll('skills', portfolio.skills.map((_, i) => String(i)), e.target.checked)}
+                  disabled={portfolio.skills.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.skills) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('skills')}
+              >
+                Delete selected ({bulkCount(bulkSel.skills)})
+              </button>
+            </div>
+          )}
           <div className="flex gap-2 mb-4">
             <input
               type="text"
@@ -1156,6 +2292,14 @@ export default function PortfolioEditor() {
                 key={index}
                 className="px-3 py-1 bg-blue-500/20 text-blue-200 rounded-full flex items-center gap-2 text-sm"
               >
+                {sectionEdit.skills && (
+                  <input
+                    type="checkbox"
+                    className="accent-blue-500"
+                    checked={!!bulkSel.skills[String(index)]}
+                    onChange={(e) => bulkToggleKey('skills', String(index), e.target.checked)}
+                  />
+                )}
                 {skill}
                 <button
                   onClick={() => removeSkill(index)}
@@ -1205,8 +2349,51 @@ export default function PortfolioEditor() {
             </button>
             </div>
           </div>
+          {sectionEdit.experience && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.experience.map((_, i) => String(i)), bulkSel.experience)}
+                  onChange={(e) => bulkSetAll('experience', portfolio.experience.map((_, i) => String(i)), e.target.checked)}
+                  disabled={portfolio.experience.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.experience) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('experience')}
+              >
+                Delete selected ({bulkCount(bulkSel.experience)})
+              </button>
+            </div>
+          )}
           {portfolio.experience.map((exp, index) => (
             <div key={index} className="mb-4 p-4 border border-white/10 rounded-xl bg-slate-900/40">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                {sectionEdit.experience ? (
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={!!bulkSel.experience[String(index)]}
+                      onChange={(e) => bulkToggleKey('experience', String(index), e.target.checked)}
+                    />
+                    Select
+                  </label>
+                ) : (
+                  <div />
+                )}
+                <button
+                  type="button"
+                  disabled={!sectionEdit.experience}
+                  className="text-xs text-red-300 underline disabled:opacity-60"
+                  onClick={() => removeExperience(index)}
+                >
+                  Remove
+                </button>
+              </div>
               <input
                 type="text"
                 placeholder="Company"
@@ -1241,13 +2428,16 @@ export default function PortfolioEditor() {
                   className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
                 />
               </div>
-              <textarea
-                placeholder="Description"
+              <CollapsibleTextarea
                 value={exp.description}
                 onChange={(e) => updateExperience(index, 'description', e.target.value)}
+                placeholder="Description"
                 disabled={!sectionEdit.experience}
                 className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
-                rows={3}
+                expandKey={`experience-${index}`}
+                expanded={!!expandedTextareas[`experience-${index}`]}
+                onToggle={toggleTextarea}
+                defaultRows={5}
               />
             </div>
           ))}
@@ -1290,6 +2480,28 @@ export default function PortfolioEditor() {
         </div>
       </div>
 
+          {sectionEdit.education && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.education.map((_, i) => String(i)), bulkSel.education)}
+                  onChange={(e) => bulkSetAll('education', portfolio.education.map((_, i) => String(i)), e.target.checked)}
+                  disabled={portfolio.education.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.education) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('education')}
+              >
+                Delete selected ({bulkCount(bulkSel.education)})
+              </button>
+            </div>
+          )}
+
           {portfolio.education.length === 0 ? (
             <div className="text-sm text-slate-400">No education added yet.</div>
           ) : (
@@ -1297,7 +2509,16 @@ export default function PortfolioEditor() {
               {portfolio.education.map((edu, index) => (
                 <div key={index} className="p-4 border border-white/10 rounded-xl bg-slate-900/40">
                   <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="text-sm font-semibold text-slate-200">Education entry {index + 1}</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {sectionEdit.education && (
+                        <input
+                          type="checkbox"
+                          checked={!!bulkSel.education[String(index)]}
+                          onChange={(e) => bulkToggleKey('education', String(index), e.target.checked)}
+                        />
+                      )}
+                      <div className="text-sm font-semibold text-slate-200">Education entry {index + 1}</div>
+                    </div>
                     <button
                       type="button"
                       disabled={!sectionEdit.education}
@@ -1351,6 +2572,153 @@ export default function PortfolioEditor() {
           </div>
         </section>
 
+        {/* Referees */}
+        <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Referees</h2>
+            <div className="flex items-center gap-3">
+              {!sectionEdit.referees ? (
+                <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, referees: true }))}>
+                  Edit
+                </button>
+              ) : (
+                <button
+                  className="text-sm underline text-blue-300 disabled:opacity-60"
+                  disabled={savingSection === 'referees'}
+                  onClick={() => saveSection('referees')}
+                >
+                  {savingSection === 'referees' ? 'Saving…' : 'Save'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={addReferee}
+                disabled={!sectionEdit.referees}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-500 disabled:opacity-60"
+              >
+                Add Referee
+              </button>
+            </div>
+          </div>
+
+          {sectionEdit.referees && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.referees.map((_, i) => String(i)), bulkSel.referees)}
+                  onChange={(e) => bulkSetAll('referees', portfolio.referees.map((_, i) => String(i)), e.target.checked)}
+                  disabled={portfolio.referees.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.referees) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('referees')}
+              >
+                Delete selected ({bulkCount(bulkSel.referees)})
+              </button>
+            </div>
+          )}
+
+          {portfolio.referees.length === 0 ? (
+            <div className="text-sm text-slate-400">No referees added yet.</div>
+          ) : (
+            <div className="space-y-4">
+              {portfolio.referees.map((r, index) => (
+                <div key={index} className="p-4 border border-white/10 rounded-xl bg-slate-900/40">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {sectionEdit.referees && (
+                        <input
+                          type="checkbox"
+                          checked={!!bulkSel.referees[String(index)]}
+                          onChange={(e) => bulkToggleKey('referees', String(index), e.target.checked)}
+                        />
+                      )}
+                      <div className="text-sm font-semibold text-slate-200 truncate">Referee {index + 1}</div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!sectionEdit.referees}
+                      className="text-xs text-red-300 underline disabled:opacity-60"
+                      onClick={() => removeReferee(index)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Name"
+                      value={r.name}
+                      onChange={(e) => updateReferee(index, 'name', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Relationship"
+                      value={r.relationship}
+                      onChange={(e) => updateReferee(index, 'relationship', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Company"
+                      value={r.company}
+                      onChange={(e) => updateReferee(index, 'company', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Title"
+                      value={r.title}
+                      onChange={(e) => updateReferee(index, 'title', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      value={r.email}
+                      onChange={(e) => updateReferee(index, 'email', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Phone"
+                      value={r.phone}
+                      onChange={(e) => updateReferee(index, 'phone', e.target.value)}
+                      disabled={!sectionEdit.referees}
+                      className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                    />
+                    <div className="md:col-span-2">
+                      <CollapsibleTextarea
+                        value={r.notes}
+                        onChange={(e) => updateReferee(index, 'notes', e.target.value)}
+                        placeholder="Notes"
+                        disabled={!sectionEdit.referees}
+                        className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                        expandKey={`referee-${index}`}
+                        expanded={!!expandedTextareas[`referee-${index}`]}
+                        onToggle={toggleTextarea}
+                        defaultRows={5}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Attachments imported from Talent Bank */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
@@ -1379,6 +2747,27 @@ export default function PortfolioEditor() {
               </button>
             </div>
           </div>
+          {sectionEdit.attachments && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.attachments.map((a) => String(a.id)), bulkSel.attachments)}
+                  onChange={(e) => bulkSetAll('attachments', portfolio.attachments.map((a) => String(a.id)), e.target.checked)}
+                  disabled={portfolio.attachments.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.attachments) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('attachments')}
+              >
+                Delete selected ({bulkCount(bulkSel.attachments)})
+              </button>
+            </div>
+          )}
 
           {portfolio.attachments.length === 0 ? (
             <p className="text-slate-400 text-sm">
@@ -1389,6 +2778,13 @@ export default function PortfolioEditor() {
               {portfolio.attachments.map((a) => (
                 <li key={a.id} className="flex items-center justify-between gap-3 border border-white/10 rounded-xl p-3 bg-slate-900/40">
                   <div className="flex items-center gap-3 min-w-0">
+                    {sectionEdit.attachments && (
+                      <input
+                        type="checkbox"
+                        checked={!!bulkSel.attachments[String(a.id)]}
+                        onChange={(e) => bulkToggleKey('attachments', String(a.id), e.target.checked)}
+                      />
+                    )}
                     {renderAttachmentThumb(a)}
                     <div className="min-w-0">
                       <div className="font-medium truncate text-white">{a.title}</div>
@@ -1444,6 +2840,14 @@ export default function PortfolioEditor() {
               )}
               <button
                 type="button"
+                onClick={openProjectImportFromHeader}
+                disabled={isImporting || !sectionEdit.projects}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-60"
+              >
+                {isImporting ? 'Importing…' : 'Import from Talent Bank'}
+              </button>
+              <button
+                type="button"
                 onClick={addProject}
                 disabled={!sectionEdit.projects}
                 className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-500 disabled:opacity-60"
@@ -1452,6 +2856,27 @@ export default function PortfolioEditor() {
               </button>
             </div>
           </div>
+          {sectionEdit.projects && (
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={bulkIsAllSelected(portfolio.projects.map((_, i) => String(i)), bulkSel.projects)}
+                  onChange={(e) => bulkSetAll('projects', portfolio.projects.map((_, i) => String(i)), e.target.checked)}
+                  disabled={portfolio.projects.length === 0}
+                />
+                Select all
+              </label>
+              <button
+                type="button"
+                disabled={bulkCount(bulkSel.projects) === 0}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs disabled:opacity-50"
+                onClick={() => bulkDeleteSelected('projects')}
+              >
+                Delete selected ({bulkCount(bulkSel.projects)})
+              </button>
+            </div>
+          )}
 
           {portfolio.projects.length === 0 ? (
             <div className="text-sm text-slate-400">No projects added yet.</div>
@@ -1460,7 +2885,16 @@ export default function PortfolioEditor() {
               {portfolio.projects.map((p, index) => (
                 <div key={index} className="p-4 border border-white/10 rounded-xl bg-slate-900/40">
                   <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="text-sm font-semibold text-slate-200">Project {index + 1}</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {sectionEdit.projects && (
+                        <input
+                          type="checkbox"
+                          checked={!!bulkSel.projects[String(index)]}
+                          onChange={(e) => bulkToggleKey('projects', String(index), e.target.checked)}
+                        />
+                      )}
+                      <div className="text-sm font-semibold text-slate-200">Project {index + 1}</div>
+                    </div>
                     <button
                       type="button"
                       disabled={!sectionEdit.projects}
@@ -1487,14 +2921,19 @@ export default function PortfolioEditor() {
                       disabled={!sectionEdit.projects}
                       className="p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
                     />
-                    <textarea
-                      placeholder="Description"
-                      value={p.description}
-                      onChange={(e) => updateProject(index, 'description', e.target.value)}
-                      disabled={!sectionEdit.projects}
-                      className="md:col-span-2 p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
-                      rows={3}
-                    />
+                    <div className="md:col-span-2">
+                      <CollapsibleTextarea
+                        value={p.description}
+                        onChange={(e) => updateProject(index, 'description', e.target.value)}
+                        placeholder="Description"
+                        disabled={!sectionEdit.projects}
+                        className="w-full p-3 rounded bg-slate-900 border border-slate-700 !text-white !placeholder:text-slate-500 disabled:opacity-60"
+                        expandKey={`project-${index}`}
+                        expanded={!!expandedTextareas[`project-${index}`]}
+                        onToggle={toggleTextarea}
+                        defaultRows={5}
+                      />
+                    </div>
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -1510,6 +2949,31 @@ export default function PortfolioEditor() {
                       Pick from Talent Bank
                     </button>
                   </div>
+
+                  {Array.isArray(p.attachmentIds) && p.attachmentIds.length > 0 ? (
+                    <div className="mt-3 grid md:grid-cols-2 gap-2">
+                      {p.attachmentIds.slice(0, 6).map((id) => (
+                        <ProjectAttachmentChip
+                          key={id}
+                          id={id}
+                          onRemove={() => {
+                            if (!sectionEdit.projects) return
+                            setPortfolio((prev) => {
+                              const updated = [...prev.projects]
+                              const cur = updated[index]
+                              if (!cur) return prev
+                              const nextIds = (Array.isArray(cur.attachmentIds) ? cur.attachmentIds : []).filter((x) => x !== id)
+                              updated[index] = { ...cur, attachmentIds: nextIds }
+                              return { ...prev, projects: updated }
+                            })
+                          }}
+                        />
+                      ))}
+                      {p.attachmentIds.length > 6 ? (
+                        <div className="text-xs text-slate-400 px-2 py-2">+{p.attachmentIds.length - 6} more attached…</div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1551,7 +3015,12 @@ export default function PortfolioEditor() {
                         {renderImportThumb(item)}
                         <div className="min-w-0">
                           <div className="font-medium truncate">{item.title}</div>
-                          <div className="text-xs text-gray-500">{item.item_type}</div>
+                          <div className="text-xs text-gray-500">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 border border-gray-200 mr-2">
+                              {item.item_type}
+                            </span>
+                            <span className="text-gray-600">{itemSummary(item)}</span>
+                          </div>
                         </div>
                       </label>
                       <div className="text-xs text-gray-400 shrink-0">
@@ -1608,7 +3077,12 @@ export default function PortfolioEditor() {
                         {renderImportThumb(item)}
                         <div className="min-w-0">
                           <div className="font-medium truncate">{item.title}</div>
-                          <div className="text-xs text-gray-500">{item.item_type}</div>
+                          <div className="text-xs text-gray-500">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-100 border border-gray-200 mr-2">
+                              {item.item_type}
+                            </span>
+                            <span className="text-gray-600">{itemSummary(item)}</span>
+                          </div>
                         </div>
                       </label>
                       <div className="text-xs text-gray-400 shrink-0">

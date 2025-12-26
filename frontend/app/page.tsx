@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -11,7 +11,7 @@ const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
 });
 
 export default function Home() {
-  const router = useRouter()
+  const router = useRouter();
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'talent' | 'business'>('talent');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -19,59 +19,47 @@ export default function Home() {
 
   useEffect(() => {
     // Set active tab based on URL hash
-    const hash = window.location.hash
+    const hash = window.location.hash;
     if (hash === '#business') {
-      setActiveTab('business')
+      setActiveTab('business');
     } else if (hash === '#talent') {
-      setActiveTab('talent')
+      setActiveTab('talent');
     }
 
     // Listen for hash changes
     const handleHashChange = () => {
-      const newHash = window.location.hash
+      const newHash = window.location.hash;
       if (newHash === '#business') {
-        setActiveTab('business')
+        setActiveTab('business');
       } else if (newHash === '#talent') {
-        setActiveTab('talent')
+        setActiveTab('talent');
       }
-    }
-    window.addEventListener('hashchange', handleHashChange)
+    };
+    window.addEventListener('hashchange', handleHashChange);
     
     // Supabase auth status (source of truth)
     const checkAuth = async () => {
       try {
-        const { data } = await supabase.auth.getSession()
-        setIsAuthenticated(!!data.session?.user?.id)
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-auth',hypothesisId:'A',location:'frontend/app/page.tsx:checkAuth',message:'home auth check',data:{hasSession:!!data.session?.user?.id},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
+        const { data } = await supabase.auth.getSession();
+        setIsAuthenticated(!!data.session?.user?.id);
+        // Debug logging disabled
       } catch {
-        setIsAuthenticated(false)
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-auth',hypothesisId:'A',location:'frontend/app/page.tsx:checkAuth',message:'home auth check failed',data:{},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
+        setIsAuthenticated(false);
+        // Debug logging disabled
       }
-    }
+    };
 
-    checkAuth().catch(() => {})
+    checkAuth().catch(() => {});
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      checkAuth().catch(() => {})
-    })
+      checkAuth().catch(() => {});
+    });
 
     return () => {
-      window.removeEventListener('hashchange', handleHashChange)
-      sub?.subscription?.unsubscribe()
-    }
-  }, [])
+      window.removeEventListener('hashchange', handleHashChange);
+      sub?.subscription?.unsubscribe();
+    };
+  }, []);
 
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run-home-render',hypothesisId:'B',location:'frontend/app/page.tsx:buttons',message:'home header button visibility',data:{activeTab,isAuthenticated,showsCreateTalent:!isAuthenticated,showsCreateBusiness:!isAuthenticated,showsTalentDashboard:true,showsBusinessDashboard:true},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'post-fix',hypothesisId:'B2',location:'frontend/app/page.tsx:buttons',message:'home header button visibility (post-fix computed)',data:{activeTab,isAuthenticated,showsCreateTalent:!isAuthenticated,showsCreateBusiness:!isAuthenticated,showsTalentDashboard:isAuthenticated,showsBusinessDashboard:isAuthenticated,showsSignInTalent:!isAuthenticated,showsSignInBusiness:!isAuthenticated},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }, [activeTab, isAuthenticated])
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -112,14 +100,12 @@ export default function Home() {
               <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
               <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
               <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
-              {!isAuthenticated ? (
-                <Link href="/login" className="hover:text-blue-400 transition-colors">Sign in</Link>
-              ) : (
+              {isAuthenticated && (
                 <button
                   type="button"
                   onClick={async () => {
-                    await supabase.auth.signOut()
-                    router.refresh()
+                    await supabase.auth.signOut();
+                    router.refresh();
                   }}
                   className="hover:text-blue-400 transition-colors text-left"
                 >
@@ -128,73 +114,39 @@ export default function Home() {
               )}
             </nav>
 
-            {/* CTA Buttons - Direct access to dashboards */}
+            {/* CTA Buttons */}
             <div className="flex gap-3">
-              {!isAuthenticated && (
-                <div className="hidden sm:flex items-center gap-2">
+              {!isAuthenticated ? (
+                <>
                   <Link
                     href="/login/talent?mode=signup&redirect=/dashboard/talent"
                     className="px-4 py-2 rounded-lg bg-blue-500/15 border border-blue-500/30 hover:bg-blue-500/25 font-semibold text-sm text-blue-100 transition-colors"
                   >
-                    Create Talent account
+                    Create Talent Account
                   </Link>
                   <Link
                     href="/login/business?mode=signup&redirect=/dashboard/business"
                     className="px-4 py-2 rounded-lg bg-green-500/15 border border-green-500/30 hover:bg-green-500/25 font-semibold text-sm text-green-100 transition-colors"
                   >
-                    Create Business account
+                    Create Business Account
                   </Link>
-                </div>
-              )}
-              {!isAuthenticated ? (
-                <>
                   <Link
                     href="/login/talent?mode=signin&redirect=/dashboard/talent"
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('creerlio_active_role', 'talent')
-                        localStorage.setItem('user_type', 'talent')
-                      } catch {}
-                    }}
                     className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
                   >
-                    Sign in (Talent)
-                  </Link>
-                  <Link
-                    href="/login/business?mode=signin&redirect=/dashboard/business"
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('creerlio_active_role', 'business')
-                        localStorage.setItem('user_type', 'business')
-                      } catch {}
-                    }}
-                    className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
-                  >
-                    Sign in (Business)
+                    Sign In
                   </Link>
                 </>
               ) : (
                 <>
                   <Link
                     href="/dashboard/talent"
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('creerlio_active_role', 'talent')
-                        localStorage.setItem('user_type', 'talent')
-                      } catch {}
-                    }}
                     className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
                   >
                     Talent Dashboard
                   </Link>
                   <Link
                     href="/dashboard/business"
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('creerlio_active_role', 'business')
-                        localStorage.setItem('user_type', 'business')
-                      } catch {}
-                    }}
                     className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
                   >
                     Business Dashboard
@@ -244,8 +196,8 @@ export default function Home() {
                     </div>
                     <button
                       onClick={(e) => {
-                        e.stopPropagation()
-                        setIsMapExpanded(false)
+                        e.stopPropagation();
+                        setIsMapExpanded(false);
                       }}
                       className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
                     >

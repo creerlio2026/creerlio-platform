@@ -43,7 +43,7 @@ except ImportError:
     PDFGenerator = None
 from app.mapping_service import MappingService
 from app.database import get_db, init_db
-from app.supabase_client import get_supabase
+from app.supabase_client import get_supabase, get_supabase_client
 from app.auth import (
     UserRegister, UserLogin, UserResponse, Token,
     create_user, authenticate_user, create_access_token,
@@ -269,11 +269,28 @@ async def add_cors_header(request: Request, call_next):
             }
         )
     # For all other requests, add CORS headers
-    response = await call_next(request)
-    # Force CORS headers - use lowercase keys that FastAPI expects
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        # Even on errors, add CORS headers
+        from fastapi.responses import JSONResponse
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": str(e)},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        return response
+    # Force CORS headers - use both lowercase and title case for maximum compatibility
     response.headers["access-control-allow-origin"] = "*"
+    response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["access-control-allow-methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
     response.headers["access-control-allow-headers"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
     return response
 
 @app.post("/api/auth/register")
@@ -537,6 +554,93 @@ async def upload_resume(file: UploadFile = File(...), db=Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/resume/parse")
+async def parse_resume_file(
+    file: UploadFile = File(...),
+    user_id: Optional[str] = Query(None, description="Optional user ID for Supabase operations")
+):
+    """
+    Parse a resume file and extract job experiences using AI.
+    Returns structured data including experiences that can be selected for portfolio.
+    """
+    if not ai_service:
+        print("[RESUME PARSE] ERROR: AI service is not available. Check OPENAI_API_KEY environment variable.")
+        raise HTTPException(status_code=503, detail="AI service is not available. Please check server configuration.")
+    
+    try:
+        # Check if file is a resume format
+        filename = file.filename or "file"
+        extension = os.path.splitext(filename)[1].lower()
+        if extension not in [".pdf", ".doc", ".docx", ".txt", ".rtf"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format: {extension}. Please upload a PDF, DOC, DOCX, TXT, or RTF file."
+            )
+        
+        print(f"[RESUME PARSE] Starting parse for {filename} (extension: {extension})")
+        
+        # Read file content
+        file_content = await file.read()
+        
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File is empty")
+        
+        print(f"[RESUME PARSE] File size: {len(file_content)} bytes")
+        
+        # Parse resume with AI
+        print(f"[RESUME PARSE] Calling AI service to parse resume...")
+        parsed_data = await ai_service.parse_resume(file_content, filename)
+        
+        print(f"[RESUME PARSE] AI parsing completed. Keys in response: {list(parsed_data.keys())}")
+        
+        # Extract experiences from parsed data
+        experiences = parsed_data.get("experience", [])
+        
+        # Log for debugging
+        print(f"[RESUME PARSE] Found {len(experiences)} experiences from {filename}")
+        if len(experiences) == 0:
+            print(f"[RESUME PARSE] WARNING: No experiences found!")
+            print(f"[RESUME PARSE] Full parsed data keys: {list(parsed_data.keys())}")
+            # Log a sample of the parsed data to see what we got
+            sample_data = {k: str(v)[:200] if not isinstance(v, (dict, list)) else type(v).__name__ for k, v in list(parsed_data.items())[:10]}
+            print(f"[RESUME PARSE] Sample parsed data: {json.dumps(sample_data, indent=2)}")
+            # Check if there's raw text we can inspect
+            if "raw_data" in parsed_data and isinstance(parsed_data["raw_data"], dict):
+                raw_text = parsed_data["raw_data"].get("original_text", "")
+                if raw_text:
+                    print(f"[RESUME PARSE] Extracted text length: {len(raw_text)} characters")
+                    print(f"[RESUME PARSE] First 500 chars of extracted text: {raw_text[:500]}")
+        
+        # Format experiences for frontend selection
+        formatted_experiences = []
+        for i, exp in enumerate(experiences):
+            formatted_exp = {
+                "company": exp.get("company", ""),
+                "title": exp.get("title", ""),
+                "start_date": exp.get("start_date", ""),
+                "end_date": exp.get("end_date", ""),
+                "description": exp.get("description", ""),
+                "achievements": exp.get("achievements", [])
+            }
+            formatted_experiences.append(formatted_exp)
+            print(f"[RESUME PARSE] Experience {i+1}: {formatted_exp.get('title')} at {formatted_exp.get('company')}")
+        
+        return {
+            "success": True,
+            "filename": filename,
+            "experiences": formatted_experiences,
+            "full_data": parsed_data  # Include all parsed data for potential future use
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[RESUME PARSE] ERROR: {str(e)}")
+        print(f"[RESUME PARSE] Traceback: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Error parsing resume: {str(e)}")
 
 
 @app.get("/api/resume/{resume_id}")
@@ -1585,6 +1689,163 @@ async def generate_business_pdf(business_id: int, db=Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== Account Deletion ====================
+
+@app.delete("/api/auth/delete-account")
+async def delete_account(request: Request):
+    """
+    Delete user account - removes auth user and all associated data from Supabase
+    Requires authenticated session with user ID in request
+    """
+    try:
+        # Get user ID from request body
+        body = await request.json()
+        user_id = body.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
+        
+        # Get Supabase admin client (requires SERVICE_ROLE_KEY)
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available. SUPABASE_SERVICE_ROLE_KEY may not be configured.")
+        
+        # Delete all related data from Supabase tables using admin client (bypasses RLS)
+        deletion_errors = []
+        
+        # Get profile IDs first (needed for conversations and other relationships)
+        talent_profile_id = None
+        business_profile_id = None
+        
+        try:
+            table = supabase_admin.table('talent_profiles')
+            talent_profile_res = table.select('id').eq('user_id', user_id).maybe_single().execute()
+            if talent_profile_res.data:
+                talent_profile_id = talent_profile_res.data['id']
+        except Exception as e:
+            deletion_errors.append(f"Error fetching talent profile ID: {str(e)}")
+        
+        try:
+            table = supabase_admin.table('business_profiles')
+            business_profile_res = table.select('id').eq('user_id', user_id).maybe_single().execute()
+            if business_profile_res.data:
+                business_profile_id = business_profile_res.data['id']
+        except Exception as e:
+            deletion_errors.append(f"Error fetching business profile ID: {str(e)}")
+        
+        try:
+            # Delete talent_bank_items
+            supabase_admin.table('talent_bank_items').delete().eq('user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"talent_bank_items: {str(e)}")
+        
+        try:
+            # Delete talent_connection_requests (using profile ID if available, otherwise user_id)
+            table = supabase_admin.table('talent_connection_requests')
+            if talent_profile_id:
+                table.delete().eq('talent_id', talent_profile_id).execute()
+            else:
+                # Fallback to user_id if profile doesn't exist
+                table.delete().eq('talent_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"talent_connection_requests: {str(e)}")
+        
+        try:
+            # Delete talent_export_consent_requests (using profile ID if available, otherwise user_id)
+            table = supabase_admin.table('talent_export_consent_requests')
+            if talent_profile_id:
+                table.delete().eq('talent_id', talent_profile_id).execute()
+            else:
+                # Fallback to user_id if profile doesn't exist
+                table.delete().eq('talent_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"talent_export_consent_requests: {str(e)}")
+        
+        try:
+            # Delete conversations (using profile IDs)
+            conv_table = supabase_admin.table('conversations')
+            if talent_profile_id:
+                conv_table.delete().eq('talent_id', talent_profile_id).execute()
+            if business_profile_id:
+                conv_table.delete().eq('business_id', business_profile_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"conversations: {str(e)}")
+        
+        try:
+            # Delete messages sent by user
+            supabase_admin.table('messages').delete().eq('sender_user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"messages: {str(e)}")
+        
+        try:
+            # Delete business_profile_pages (using business profile ID)
+            if business_profile_id:
+                supabase_admin.table('business_profile_pages').delete().eq('business_id', business_profile_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"business_profile_pages: {str(e)}")
+        
+        try:
+            # Delete talent profile
+            supabase_admin.table('talent_profiles').delete().eq('user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"talent_profiles: {str(e)}")
+        
+        try:
+            # Delete business profile
+            supabase_admin.table('business_profiles').delete().eq('user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"business_profiles: {str(e)}")
+        
+        # Finally, delete user from Supabase Auth using Admin API
+        auth_deleted = False
+        try:
+            # Python Supabase client uses auth.admin.delete_user(user_id)
+            response = supabase_admin.auth.admin.delete_user(user_id)
+            # Check if there's an error in the response
+            if hasattr(response, 'error') and response.error:
+                raise Exception(f"Supabase error: {response.error}")
+            auth_deleted = True
+            
+            # Verify deletion by attempting to get the user (should fail if deleted)
+            try:
+                verify_response = supabase_admin.auth.admin.get_user_by_id(user_id)
+                if verify_response and hasattr(verify_response, 'user') and verify_response.user:
+                    # User still exists - deletion may have failed
+                    raise Exception("User still exists after deletion attempt")
+            except Exception as verify_error:
+                error_msg = str(verify_error).lower()
+                # If error is "user not found" or similar, deletion was successful
+                if "not found" in error_msg or "does not exist" in error_msg:
+                    auth_deleted = True
+                else:
+                    # Other errors might indicate deletion failed
+                    print(f"Warning: Could not verify user deletion: {verify_error}")
+                    # Don't fail - assume deletion succeeded if no error was raised
+            
+        except Exception as auth_error:
+            error_msg = str(auth_error)
+            print(f"Error deleting auth user {user_id}: {error_msg}")
+            deletion_errors.append(f"auth user: {error_msg}")
+            # Re-raise if it's a critical error
+            if "not available" in error_msg.lower() or "service" in error_msg.lower():
+                raise HTTPException(status_code=503, detail=f"Auth deletion service error: {error_msg}")
+        
+        # Return success even if some deletions failed (as long as auth user was deleted)
+        if auth_deleted:
+            return {
+                "success": True,
+                "message": "Account deleted successfully. User cannot log in again.",
+                "warnings": deletion_errors if deletion_errors else None
+            }
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to delete auth user. The account still exists and can be logged into. Errors: {', '.join(deletion_errors)}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+
+
 if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
@@ -1610,4 +1871,429 @@ if __name__ == "__main__":
             f.write(json.dumps({"location":"main.py:420","message":"Server startup failed","data":{"error":str(e),"type":type(e).__name__},"timestamp":int(__import__('time').time()*1000),"sessionId":"debug-session","runId":"run1","hypothesisId":"A"})+"\n")
         # #endregion
         raise
+
+
+# ==================== Admin Panel API ====================
+
+def check_admin_access(user_id: str) -> bool:
+    """
+    Check if user has admin access
+    Admin users are identified by email domain or explicit admin flag in metadata
+    """
+    if not user_id:
+        return False
+    
+    supabase = get_supabase_client(use_service_key=True)
+    if not supabase:
+        return False
+    
+    try:
+        # Get user from auth
+        user_res = supabase.auth.admin.get_user_by_id(user_id)
+        if not user_res or not hasattr(user_res, 'user') or not user_res.user:
+            return False
+        
+        user = user_res.user
+        user_metadata = user.user_metadata or {}
+        
+        # Check for admin flag in metadata
+        if user_metadata.get('is_admin') is True or user_metadata.get('admin') is True:
+            return True
+        
+        # Check for admin email domain (configurable via env)
+        admin_domains = os.getenv("ADMIN_EMAIL_DOMAINS", "").split(",")
+        admin_domains = [d.strip().lower() for d in admin_domains if d.strip()]
+        
+        if user.email:
+            email_domain = user.email.split("@")[-1].lower()
+            if email_domain in admin_domains:
+                return True
+        
+        # Check for specific admin emails
+        admin_emails = os.getenv("ADMIN_EMAILS", "").split(",")
+        admin_emails = [e.strip().lower() for e in admin_emails if e.strip()]
+        if user.email and user.email.lower() in admin_emails:
+            return True
+        
+        return False
+    except Exception as e:
+        print(f"Error checking admin access: {e}")
+        return False
+
+
+@app.post("/api/admin/stats")
+async def get_admin_stats(request: Request):
+    """Get platform statistics for admin dashboard"""
+    try:
+        body = await request.json()
+        user_id = body.get("user_id") or request.headers.get("X-User-Id")
+        
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        # Get counts
+        talent_count = supabase_admin.table('talent_profiles').select('id', count='exact').execute()
+        business_count = supabase_admin.table('business_profiles').select('id', count='exact').execute()
+        
+        # Get auth users count
+        try:
+            # Note: Supabase Python client doesn't have direct user count, so we'll estimate
+            # by counting profiles
+            total_users = (talent_count.count or 0) + (business_count.count or 0)
+        except:
+            total_users = 0
+        
+        # Get recent registrations (last 7 days)
+        from datetime import datetime, timedelta
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        recent_talent = supabase_admin.table('talent_profiles').select('id', count='exact').gte('created_at', week_ago).execute()
+        recent_business = supabase_admin.table('business_profiles').select('id', count='exact').gte('created_at', week_ago).execute()
+        
+        return {
+            "total_talent": talent_count.count or 0,
+            "total_business": business_count.count or 0,
+            "total_users": total_users,
+            "recent_talent_7d": recent_talent.count or 0,
+            "recent_business_7d": recent_business.count or 0,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+@app.post("/api/admin/talent")
+async def get_admin_talent(request: Request):
+    """Get all talent registrations (admin only)"""
+    try:
+        body = await request.json()
+        user_id = body.get("user_id") or request.headers.get("X-User-Id")
+        skip = body.get("skip", 0)
+        limit = body.get("limit", 50)
+        search = body.get("search")
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        # Get all talent profiles first
+        all_result = supabase_admin.table('talent_profiles').select('*').execute()
+        
+        # Filter by search if provided
+        filtered_data = all_result.data or []
+        if search:
+            search_lower = search.lower()
+            filtered_data = [
+                item for item in filtered_data
+                if (str(item.get('name', '')).lower().find(search_lower) >= 0 or
+                    str(item.get('email', '')).lower().find(search_lower) >= 0)
+            ]
+        
+        # Sort by created_at descending (newest first)
+        try:
+            filtered_data.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        except:
+            pass
+        
+        # Apply pagination
+        total_count = len(filtered_data)
+        paginated_data = filtered_data[skip:skip + limit]
+        
+        return {
+            "data": paginated_data,
+            "count": total_count,
+            "skip": skip,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in get_admin_talent: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Failed to get talent: {str(e)}")
+
+
+@app.post("/api/admin/business")
+async def get_admin_business(request: Request):
+    """Get all business registrations (admin only)"""
+    try:
+        body = await request.json()
+        user_id = body.get("user_id") or request.headers.get("X-User-Id")
+        skip = body.get("skip", 0)
+        limit = body.get("limit", 50)
+        search = body.get("search")
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        # Get all business profiles first
+        all_result = supabase_admin.table('business_profiles').select('*').execute()
+        
+        # Filter by search if provided
+        filtered_data = all_result.data or []
+        if search:
+            search_lower = search.lower()
+            filtered_data = [
+                item for item in filtered_data
+                if (str(item.get('name', '')).lower().find(search_lower) >= 0 or
+                    str(item.get('email', '')).lower().find(search_lower) >= 0)
+            ]
+        
+        # Sort by created_at descending (newest first)
+        try:
+            filtered_data.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        except:
+            pass
+        
+        # Apply pagination
+        total_count = len(filtered_data)
+        paginated_data = filtered_data[skip:skip + limit]
+        
+        return {
+            "data": paginated_data,
+            "count": total_count,
+            "skip": skip,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in get_admin_business: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Failed to get business: {str(e)}")
+
+
+@app.post("/api/admin/users")
+async def get_admin_users(request: Request):
+    """Get all users (admin only)"""
+    try:
+        body = await request.json()
+        user_id = body.get("user_id") or request.headers.get("X-User-Id")
+        skip = body.get("skip", 0)
+        limit = body.get("limit", 50)
+        search = body.get("search")
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        # Get users from profiles (aggregate from talent and business profiles)
+        try:
+            talent_profiles = supabase_admin.table('talent_profiles').select('user_id, name, email, created_at, is_active').execute()
+        except Exception as e:
+            print(f"Error fetching talent profiles: {e}")
+            talent_profiles = type('obj', (object,), {'data': []})()
+        
+        try:
+            business_profiles = supabase_admin.table('business_profiles').select('user_id, name, email, created_at, is_active').execute()
+        except Exception as e:
+            print(f"Error fetching business profiles: {e}")
+            business_profiles = type('obj', (object,), {'data': []})()
+        
+        users = []
+        seen_user_ids = set()
+        
+        for tp in (talent_profiles.data or []):
+            if tp.get('user_id') and tp['user_id'] not in seen_user_ids:
+                users.append({
+                    "user_id": tp['user_id'],
+                    "name": tp.get('name'),
+                    "email": tp.get('email'),
+                    "type": "talent",
+                    "created_at": tp.get('created_at'),
+                    "is_active": tp.get('is_active', True)
+                })
+                seen_user_ids.add(tp['user_id'])
+        
+        for bp in (business_profiles.data or []):
+            if bp.get('user_id') and bp['user_id'] not in seen_user_ids:
+                users.append({
+                    "user_id": bp['user_id'],
+                    "name": bp.get('name'),
+                    "email": bp.get('email'),
+                    "type": "business",
+                    "created_at": bp.get('created_at'),
+                    "is_active": bp.get('is_active', True)
+                })
+                seen_user_ids.add(bp['user_id'])
+        
+        # Sort by created_at descending
+        try:
+            users.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        except:
+            pass
+        
+        # Apply search filter if provided
+        if search:
+            search_lower = search.lower()
+            users = [
+                u for u in users
+                if (str(u.get('name', '')).lower().find(search_lower) >= 0 or
+                    str(u.get('email', '')).lower().find(search_lower) >= 0)
+            ]
+        
+        # Apply pagination
+        total_count = len(users)
+        paginated_users = users[skip:skip + limit]
+        
+        return {
+            "data": paginated_users,
+            "count": total_count,
+            "skip": skip,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error in get_admin_users: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Failed to get users: {str(e)}")
+
+
+@app.post("/api/admin/talent/{talent_id}/activate")
+async def activate_talent(talent_id: str, request: Request):
+    """Activate/deactivate talent profile (admin only)"""
+    try:
+        user_id = request.headers.get("X-User-Id") or (await request.json()).get("user_id")
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        body = await request.json()
+        is_active = body.get("is_active", True)
+        
+        result = supabase_admin.table('talent_profiles').update({"is_active": is_active}).eq('id', talent_id).execute()
+        
+        return {"success": True, "data": result.data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update talent: {str(e)}")
+
+
+@app.post("/api/admin/business/{business_id}/activate")
+async def activate_business(business_id: str, request: Request):
+    """Activate/deactivate business profile (admin only)"""
+    try:
+        user_id = request.headers.get("X-User-Id") or (await request.json()).get("user_id")
+        if not user_id or not check_admin_access(user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        body = await request.json()
+        is_active = body.get("is_active", True)
+        
+        result = supabase_admin.table('business_profiles').update({"is_active": is_active}).eq('id', business_id).execute()
+        
+        return {"success": True, "data": result.data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update business: {str(e)}")
+
+
+@app.delete("/api/admin/user/{user_id}")
+async def delete_user_admin(user_id: str, request: Request):
+    """Delete user account (admin only)"""
+    try:
+        admin_user_id = request.headers.get("X-User-Id") or (await request.json()).get("admin_user_id")
+        if not admin_user_id or not check_admin_access(admin_user_id):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        # Reuse the existing delete_account logic
+        from fastapi import Request as Req
+        fake_request = Req({"type": "http"})
+        fake_request._json = {"user_id": user_id}
+        
+        # Call the existing delete endpoint logic
+        supabase_admin = get_supabase_client(use_service_key=True)
+        if not supabase_admin:
+            raise HTTPException(status_code=503, detail="Admin service not available")
+        
+        # Get profile IDs
+        talent_profile_id = None
+        business_profile_id = None
+        
+        try:
+            talent_profile_res = supabase_admin.table('talent_profiles').select('id').eq('user_id', user_id).maybe_single().execute()
+            if talent_profile_res.data:
+                talent_profile_id = talent_profile_res.data['id']
+        except:
+            pass
+        
+        try:
+            business_profile_res = supabase_admin.table('business_profiles').select('id').eq('user_id', user_id).maybe_single().execute()
+            if business_profile_res.data:
+                business_profile_id = business_profile_res.data['id']
+        except:
+            pass
+        
+        # Delete related data
+        deletion_errors = []
+        tables_to_clear = ["talent_bank_items", "messages"]
+        for table_name in tables_to_clear:
+            try:
+                supabase_admin.table(table_name).delete().eq('user_id', user_id).execute()
+            except Exception as e:
+                deletion_errors.append(f"Error deleting from {table_name}: {str(e)}")
+        
+        if talent_profile_id:
+            try:
+                supabase_admin.table('talent_connection_requests').delete().eq('talent_id', talent_profile_id).execute()
+            except:
+                pass
+        
+        if business_profile_id:
+            try:
+                supabase_admin.table('business_profile_pages').delete().eq('business_id', business_profile_id).execute()
+            except:
+                pass
+        
+        # Delete profiles
+        try:
+            supabase_admin.table('talent_profiles').delete().eq('user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"talent_profiles: {str(e)}")
+        
+        try:
+            supabase_admin.table('business_profiles').delete().eq('user_id', user_id).execute()
+        except Exception as e:
+            deletion_errors.append(f"business_profiles: {str(e)}")
+        
+        # Delete auth user
+        try:
+            supabase_admin.auth.admin.delete_user(user_id)
+        except Exception as e:
+            deletion_errors.append(f"auth user: {str(e)}")
+        
+        return {
+            "success": True,
+            "message": "User deleted successfully",
+            "warnings": deletion_errors if deletion_errors else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
 

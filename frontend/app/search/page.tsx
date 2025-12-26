@@ -3,12 +3,11 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import axios from 'axios'
 import SearchMap from '@/components/SearchMap'
 import { supabase } from '@/lib/supabase'
 
 interface Job {
-  id: number
+  id: string | number
   title: string
   description: string | null
   location: string | null
@@ -18,7 +17,7 @@ interface Job {
 }
 
 interface Talent {
-  id: number
+  id: string | number
   name: string
   title: string | null
   bio: string | null
@@ -37,7 +36,7 @@ interface Business {
 }
 
 interface MapMarker {
-  id: number
+  id: string | number
   lat: number
   lng: number
   title: string
@@ -68,33 +67,95 @@ export default function SearchPage() {
   const [isMapExpanded, setIsMapExpanded] = useState(false)
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-    const storedUserType = localStorage.getItem('user_type')
-    const storedActiveRole = localStorage.getItem('creerlio_active_role')
+    let cancelled = false
     
-    setIsAuthenticated(!!token && !!email)
-    if (storedUserType) {
-      setUserType(storedUserType)
-    }
-    if (storedActiveRole === 'talent' || storedActiveRole === 'business') {
-      setActiveRole(storedActiveRole)
-    }
+    // Check Supabase session (source of truth)
+    supabase.auth.getSession().then(async (res: any) => {
+      const data = res?.data
+      const uid = data.session?.user?.id ?? null
+      const email = data.session?.user?.email ?? null
+      
+      if (!uid) {
+        // Not authenticated
+        if (!cancelled) {
+          setIsAuthenticated(false)
+          setUserType(null)
+          setActiveRole(null)
+        }
+        return
+      }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S1',location:'frontend/app/search/page.tsx:mount',message:'Search auth from localStorage',data:{hasToken:!!token,hasEmail:!!email,storedUserType:storedUserType??null,storedActiveRole:storedActiveRole??null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+      if (!cancelled) {
+        setIsAuthenticated(true)
+      }
 
-    // Compare with Supabase session (source of truth for signed-in users)
-    supabase.auth.getSession().then(({ data }) => {
+      // CRITICAL: Determine actual user type by checking which profile exists
+      // This prevents showing wrong dashboard buttons
+      const [talentCheck, businessCheck] = await Promise.all([
+        supabase.from('talent_profiles').select('id').eq('user_id', uid).maybeSingle(),
+        supabase.from('business_profiles').select('id').eq('user_id', uid).maybeSingle()
+      ])
+
+      const hasTalentProfile = !!talentCheck.data && !talentCheck.error
+      const hasBusinessProfile = !!businessCheck.data && !businessCheck.error
+
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2',location:'frontend/app/search/page.tsx:mount',message:'Search auth from Supabase session',data:{hasSession:!!data.session?.user?.id,hasSessionEmail:!!data.session?.user?.email},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'frontend/app/search/page.tsx:mount:profile_check',message:'Checking actual user profiles to determine type',data:{hasTalentProfile,hasBusinessProfile,talentError:talentCheck.error?.code,businessError:businessCheck.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'search-auth',hypothesisId:'S1'})}).catch(()=>{});
+      // #endregion
+
+      if (!cancelled) {
+        // Set user type based on actual profiles (prioritize talent if both exist for now)
+        if (hasTalentProfile && !hasBusinessProfile) {
+          setUserType('talent')
+          setActiveRole('talent')
+          try {
+            localStorage.setItem('user_type', 'talent')
+            localStorage.setItem('creerlio_active_role', 'talent')
+          } catch {}
+        } else if (hasBusinessProfile && !hasTalentProfile) {
+          setUserType('business')
+          setActiveRole('business')
+          try {
+            localStorage.setItem('user_type', 'business')
+            localStorage.setItem('creerlio_active_role', 'business')
+          } catch {}
+        } else if (hasTalentProfile && hasBusinessProfile) {
+          // User has both - use activeRole from localStorage or default to talent
+          const storedActiveRole = localStorage.getItem('creerlio_active_role')
+          if (storedActiveRole === 'business') {
+            setUserType('business')
+            setActiveRole('business')
+          } else {
+            setUserType('talent')
+            setActiveRole('talent')
+            try {
+              localStorage.setItem('creerlio_active_role', 'talent')
+            } catch {}
+          }
+        } else {
+          // No profiles found - not fully set up
+          setUserType(null)
+          setActiveRole(null)
+        }
+      }
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'frontend/app/search/page.tsx:mount:auth_set',message:'Search auth set from Supabase',data:{hasSession:!!data.session?.user?.id,hasEmail:!!email,determinedUserType:hasTalentProfile&&!hasBusinessProfile?'talent':hasBusinessProfile&&!hasTalentProfile?'business':hasTalentProfile&&hasBusinessProfile?'both':null},timestamp:Date.now(),sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2'})}).catch(()=>{});
       // #endregion
     }).catch(() => {
+      if (!cancelled) {
+        setIsAuthenticated(false)
+        setUserType(null)
+        setActiveRole(null)
+      }
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2',location:'frontend/app/search/page.tsx:mount',message:'Search Supabase session check failed',data:{},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'frontend/app/search/page.tsx:mount',message:'Search Supabase session check failed',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'search-auth',hypothesisId:'S2'})}).catch(()=>{});
       // #endregion
     })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -127,19 +188,19 @@ export default function SearchPage() {
   const geocodeLocation = async (location: string): Promise<{ lat: number; lng: number } | null> => {
     try {
       const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoiY3JlZXJsaW8iLCJhIjoiY21pY3IxZHljMXFwNTJzb2FydzR4b3F1YSJ9.Is8-GyfEdqwKKEo2cGO65g'
-      const response = await axios.get(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json`,
-        {
-          params: {
-            access_token: MAPBOX_TOKEN,
-            limit: 1
-          }
-        }
-      )
-      
-      if (response.data.features && response.data.features.length > 0) {
-        const [lng, lat] = response.data.features[0].center
-        return { lat, lng }
+      const u = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json`)
+      u.searchParams.set('access_token', MAPBOX_TOKEN)
+      u.searchParams.set('limit', '1')
+
+      const res = await fetch(u.toString())
+      if (!res.ok) return null
+      const data: any = await res.json().catch(() => null)
+
+      if (data?.features && data.features.length > 0) {
+        const center = data.features[0]?.center
+        const lng = Array.isArray(center) ? center[0] : null
+        const lat = Array.isArray(center) ? center[1] : null
+        if (typeof lng === 'number' && typeof lat === 'number') return { lat, lng }
       }
       return null
     } catch (err) {
@@ -206,7 +267,7 @@ export default function SearchPage() {
     }
 
     processMarkers()
-  }, [searchResults, searchType])
+  }, [searchResults, searchType, allowTalentSearch])
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -215,54 +276,105 @@ export default function SearchPage() {
     setSearchResults({})
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:58',message:'Starting search',data:{searchType,query:searchQuery,location,apiUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:58',message:'Starting search',data:{searchType,query:searchQuery,location},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
 
       if (searchType === 'jobs') {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:65',message:'Searching jobs',data:{url:`${apiUrl}/api/jobs/public`,params:{keyword:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        // Build params object, only including non-empty values
-        const params: Record<string, string> = {}
-        if (searchQuery && searchQuery.trim()) {
-          params.keyword = searchQuery.trim()
+        const q = (searchQuery || '').trim()
+        const loc = (location || '').trim()
+
+        // Jobs are stored in Supabase (if table exists). If it's not configured yet, show a calm message.
+        let qb: any = supabase.from('jobs').select('id,title,description,location,city,status,created_at').limit(100)
+        // Prefer published jobs if column exists
+        qb = qb.eq('status', 'published')
+
+        if (q) {
+          qb = qb.or(`title.ilike.%${q}%,description.ilike.%${q}%`)
         }
-        if (location && location.trim()) {
-          params.location = location.trim()
+        if (loc) {
+          qb = qb.or(`location.ilike.%${loc}%,city.ilike.%${loc}%`)
         }
-        
-        const response = await axios.get(`${apiUrl}/api/jobs/public`, { params })
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:73',message:'Jobs search succeeded',data:{count:response.data?.jobs?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        setSearchResults({ jobs: response.data.jobs || [] })
+
+        const res: any = await qb
+        if (res.error) {
+          setSearchResults({ jobs: [] })
+          setError('Jobs search is not available yet (missing jobs table or permissions).')
+          return
+        }
+        setSearchResults({ jobs: (res.data || []) as any })
       } else if (searchType === 'talent') {
         if (!allowTalentSearch) {
           setError('Talent search is only available to Business accounts.')
           return
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:77',message:'Searching talent',data:{url:`${apiUrl}/api/talent/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
-        // Build params object, only including non-empty values
-        const params: Record<string, string> = {}
-        if (searchQuery && searchQuery.trim()) {
-          params.query = searchQuery.trim()
+        const q = (searchQuery || '').trim().toLowerCase()
+        const loc = (location || '').trim().toLowerCase()
+
+        // Schema-tolerant select: try common naming patterns.
+        const selectors = [
+          'id, name, title, bio, skills, location, latitude, longitude',
+          'id, full_name, title, bio, skills, location, latitude, longitude',
+          'id, display_name, title, bio, skills, location, latitude, longitude',
+          'id, first_name, last_name, title, bio, skills, location, latitude, longitude',
+          'id, name, location',
+          'id, full_name, location',
+          'id, display_name, location',
+        ]
+
+        let rows: any[] | null = null
+        for (const sel of selectors) {
+          const r: any = await (supabase.from('talent_profiles').select(sel) as any).limit(200)
+          if (!r.error) {
+            rows = r.data || []
+            break
+          }
+          // If missing-column, try next selector; otherwise stop and show error
+          const msg = String(r.error?.message ?? '')
+          const code = String(r.error?.code ?? '')
+          const isMissingCol = code === 'PGRST204' || /Could not find the .* column/i.test(msg)
+          if (!isMissingCol) {
+            setSearchResults({ talent: [] })
+            setError('Talent search is not available (permissions or schema mismatch).')
+            return
+          }
         }
-        if (location && location.trim()) {
-          params.location = location.trim()
-        }
-        
-        const response = await axios.get(`${apiUrl}/api/talent/search`, { params })
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:85',message:'Talent search succeeded',data:{count:response.data?.talents?.length || 0,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
-        setSearchResults({ talent: response.data.talents || [] })
+
+        const mapped: Talent[] = (rows || []).map((t: any) => {
+          const name =
+            (typeof t?.name === 'string' && t.name) ||
+            (typeof t?.full_name === 'string' && t.full_name) ||
+            (typeof t?.display_name === 'string' && t.display_name) ||
+            (typeof t?.first_name === 'string' || typeof t?.last_name === 'string'
+              ? `${t?.first_name ?? ''} ${t?.last_name ?? ''}`.trim()
+              : '') ||
+            'Talent'
+
+          const skills = Array.isArray(t?.skills) ? (t.skills as any[]).map((s) => String(s)) : null
+
+          return {
+            id: t?.id ?? String(Math.random()),
+            name,
+            title: typeof t?.title === 'string' ? t.title : null,
+            bio: typeof t?.bio === 'string' ? t.bio : null,
+            skills,
+            location: typeof t?.location === 'string' ? t.location : null,
+            latitude: typeof t?.latitude === 'number' ? t.latitude : null,
+            longitude: typeof t?.longitude === 'number' ? t.longitude : null,
+          }
+        })
+
+        const filtered = mapped.filter((t) => {
+          const blob = `${t.name} ${t.title ?? ''} ${t.bio ?? ''} ${(t.skills || []).join(' ')} ${t.location ?? ''}`.toLowerCase()
+          if (q && !blob.includes(q)) return false
+          if (loc && !(t.location || '').toLowerCase().includes(loc)) return false
+          return true
+        })
+
+        setSearchResults({ talent: filtered.slice(0, 100) })
       } else if (searchType === 'business') {
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:89',message:'Searching businesses',data:{url:`${apiUrl}/api/business/search`,params:{query:searchQuery,location}},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_search_start',message:'Business search started',data:{searchQuery,searchType,location},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
         // #endregion
         // IMPORTANT: do not depend on localhost:8000 backend (often offline in this environment).
         // Search published business profiles directly from Supabase (RLS-safe public read).
@@ -272,29 +384,87 @@ export default function SearchPage() {
           return
         }
 
-        const or = `name.ilike.%${q}%,tagline.ilike.%${q}%,mission.ilike.%${q}%,slug.ilike.%${q}%`
-        const res = await supabase
+        // First try searching published business profile pages
+        const pagesOr = `name.ilike.%${q}%,tagline.ilike.%${q}%,mission.ilike.%${q}%,slug.ilike.%${q}%`
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_pages_query',message:'Querying business_profile_pages',data:{q,query:pagesOr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+        // #endregion
+        const pagesRes = await supabase
           .from('business_profile_pages')
           .select('business_id, slug, name, tagline, mission')
           .eq('is_published', true)
-          .or(or)
+          .or(pagesOr)
           .limit(50)
 
         // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_supabase',message:'Business search via Supabase completed',data:{q,or,isPublished:true,ok:!res.error,count:(res.data||[]).length,firstSlug:(res.data as any)?.[0]?.slug ?? null,errCode:(res.error as any)?.code ?? null,errMsg:(res.error as any)?.message ?? null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_pages_search',message:'Business pages search result',data:{q,ok:!pagesRes.error,count:(pagesRes.data||[]).length,errCode:(pagesRes.error as any)?.code,errMsg:(pagesRes.error as any)?.message,errDetails:(pagesRes.error as any)?.details,firstResult:(pagesRes.data||[])[0]||null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
         // #endregion
 
-        if (res.error) throw res.error
+        let businesses: Business[] = []
+        
+        // Add businesses from published pages
+        if (!pagesRes.error && pagesRes.data && pagesRes.data.length > 0) {
+          businesses = pagesRes.data.map((r: any) => ({
+            id: String(r.business_id),
+            slug: typeof r.slug === 'string' ? r.slug : null,
+            name: typeof r.name === 'string' ? r.name : 'Business',
+            tagline: typeof r.tagline === 'string' ? r.tagline : null,
+            mission: typeof r.mission === 'string' ? r.mission : null,
+          }))
+        }
+        
+        // Also search business_profiles table (combine results from both tables)
+        // Note: business_profiles table has 'name' and 'description' columns
+        // Also search by email if the query might be an email
+        const existingIds = new Set(businesses.map(b => b.id))
+        const profilesOr = `name.ilike.%${q}%,description.ilike.%${q}%`
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_profiles_query',message:'Querying business_profiles',data:{q,query:profilesOr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+        // #endregion
+        const profilesRes = await supabase
+          .from('business_profiles')
+          .select('id, name, description, user_id')
+          .or(profilesOr)
+          .limit(50)
 
-        const mapped: Business[] = (res.data || []).map((r: any) => ({
-          id: String(r.business_id),
-          slug: typeof r.slug === 'string' ? r.slug : null,
-          name: typeof r.name === 'string' ? r.name : 'Business',
-          tagline: typeof r.tagline === 'string' ? r.tagline : null,
-          mission: typeof r.mission === 'string' ? r.mission : null,
-        }))
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_profiles_search',message:'Business profiles search result',data:{q,query:profilesOr,ok:!profilesRes.error,count:(profilesRes.data||[]).length,errCode:(profilesRes.error as any)?.code,errMsg:(profilesRes.error as any)?.message,errDetails:(profilesRes.error as any)?.details,firstResult:(profilesRes.data||[])[0]||null,allResults:(profilesRes.data||[]).map((r:any)=>({id:r.id,name:r.name,description:r.description?.substring(0,50)||null}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+        // #endregion
 
-        setSearchResults({ businesses: mapped })
+        // Also check if we should search by email (if query looks like email or contains @)
+        if (q.includes('@') || q.includes('gmail') || q.includes('email')) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_email_search',message:'Query might be email, checking all business profiles',data:{q},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+          // #endregion
+          // Try to get all business profiles to see what exists (for debugging)
+          const allProfilesRes = await supabase
+            .from('business_profiles')
+            .select('id, name, description, user_id')
+            .limit(100)
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_all_profiles',message:'All business profiles check',data:{q,ok:!allProfilesRes.error,count:(allProfilesRes.data||[]).length,profiles:(allProfilesRes.data||[]).map((r:any)=>({id:r.id,name:r.name,hasDescription:!!r.description}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+          // #endregion
+        }
+
+        if (!profilesRes.error && profilesRes.data && profilesRes.data.length > 0) {
+          // Add businesses from profiles table, avoiding duplicates
+          const profileBusinesses = profilesRes.data
+            .filter((r: any) => !existingIds.has(String(r.id)))
+            .map((r: any) => ({
+              id: String(r.id),
+              slug: null,
+              name: typeof r.name === 'string' && r.name ? r.name : 'Business',
+              tagline: null,
+              mission: typeof r.description === 'string' ? r.description : null,
+            }))
+          businesses = [...businesses, ...profileBusinesses]
+        }
+
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'search/page.tsx:business_search_final',message:'Business search final results',data:{query:q,resultCount:businesses.length,allResults:businesses.map(b=>({id:b.id,name:b.name}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BUS_SEARCH'})}).catch(()=>{});
+        // #endregion
+
+        setSearchResults({ businesses })
       }
     } catch (err: any) {
       // #region agent log
@@ -347,19 +517,31 @@ export default function SearchPage() {
               <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
               {isAuthenticated ? (
                 <>
-                  <Link 
-                    href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'} 
-                    className="hover:text-blue-400 transition-colors"
-                  >
-                    Dashboard
-                  </Link>
+                  {userType === 'business' ? (
+                    <Link 
+                      href="/dashboard/business" 
+                      className="hover:text-blue-400 transition-colors"
+                    >
+                      Business Dashboard
+                    </Link>
+                  ) : userType === 'talent' ? (
+                    <Link 
+                      href="/dashboard/talent" 
+                      className="hover:text-blue-400 transition-colors"
+                    >
+                      Talent Dashboard
+                    </Link>
+                  ) : null}
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      await supabase.auth.signOut()
                       localStorage.removeItem('access_token')
                       localStorage.removeItem('user_email')
                       localStorage.removeItem('user_type')
+                      localStorage.removeItem('creerlio_active_role')
                       setIsAuthenticated(false)
                       setUserType(null)
+                      setActiveRole(null)
                       router.push('/')
                     }}
                     className="hover:text-blue-400 transition-colors"
@@ -371,18 +553,27 @@ export default function SearchPage() {
             </nav>
 
             {isAuthenticated ? (
-              <Link
-                href={userType === 'business' ? '/dashboard/business' : '/dashboard/talent'}
-                className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
-              >
-                Go to Dashboard
-              </Link>
+              userType === 'business' ? (
+                <Link
+                  href="/dashboard/business"
+                  className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                >
+                  Business Dashboard
+                </Link>
+              ) : userType === 'talent' ? (
+                <Link
+                  href="/dashboard/talent"
+                  className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                >
+                  Talent Dashboard
+                </Link>
+              ) : null
             ) : (
               <Link
-                href="/dashboard/business"
+                href="/login/talent?mode=signup"
                 className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
               >
-                Business Dashboard
+                Create Talent Account
               </Link>
             )}
           </div>
@@ -477,8 +668,8 @@ export default function SearchPage() {
                           ? 'Search businesses… (e.g. industry, company, program)'
                           : 'Search talent…'
                     }
-                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-                    style={{ color: 'white' }}
+                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
                   />
 
                   {/* Location Filter */}
@@ -487,8 +678,8 @@ export default function SearchPage() {
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                     placeholder="Location (optional)"
-                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
-                    style={{ color: 'white' }}
+                    className="w-full px-6 py-4 bg-slate-800 border border-blue-500/20 rounded-lg placeholder-gray-400 focus:outline-none focus:border-blue-500 transition-colors"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
                   />
 
                   {/* Search Button */}
@@ -506,10 +697,14 @@ export default function SearchPage() {
             {/* Map - Right Side */}
             {isMapExpanded ? (
               <div 
-                className="fixed inset-4 z-50 bg-slate-900/95 backdrop-blur-sm rounded-2xl border border-blue-500/20 shadow-2xl p-6"
+                className="fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-sm"
                 onClick={() => setIsMapExpanded(false)}
+                style={{ width: '100vw', height: '100vh' }}
               >
-                <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
+                <div 
+                  className="absolute inset-0 rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950 shadow-2xl"
+                  style={{ width: '100%', height: '100%' }}
+                >
                   {isGeocoding ? (
                     <div className="h-full flex items-center justify-center bg-slate-800/50 rounded-lg">
                       <div className="text-center">
@@ -518,7 +713,7 @@ export default function SearchPage() {
                       </div>
                     </div>
                   ) : (
-                    <SearchMap markers={mapMarkers} />
+                    <SearchMap markers={mapMarkers} isExpanded={true} />
                   )}
                 </div>
                 <button
@@ -526,15 +721,14 @@ export default function SearchPage() {
                     e.stopPropagation()
                     setIsMapExpanded(false)
                   }}
-                  className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
+                  className="absolute top-4 right-4 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
                 >
                   Close
                 </button>
               </div>
             ) : (
               <div 
-                className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6 cursor-pointer hover:border-blue-500/50 transition-all relative"
-                onClick={() => setIsMapExpanded(true)}
+                className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-6 transition-all relative"
               >
                 <div className="h-[600px] w-full">
                   {isGeocoding ? (
@@ -545,12 +739,18 @@ export default function SearchPage() {
                       </div>
                     </div>
                   ) : (
-                    <SearchMap markers={mapMarkers} />
+                    <SearchMap markers={mapMarkers} isExpanded={false} />
                   )}
                 </div>
-                <div className="absolute bottom-6 right-6 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsMapExpanded(true)
+                  }}
+                  className="absolute bottom-6 right-6 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium cursor-pointer transition-colors"
+                >
                   Click to expand
-                </div>
+                </button>
               </div>
             )}
           </div>

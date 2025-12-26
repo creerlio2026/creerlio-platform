@@ -3,22 +3,15 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import axios from 'axios'
-
-interface User {
-  id: number
-  email: string
-  user_type: string
-}
+import { supabase } from '@/lib/supabase'
 
 interface BusinessProfile {
-  id: number
-  name: string
+  id: string
+  name: string | null
 }
 
 export default function CreateJobPage() {
   const router = useRouter()
-  const [user, setUser] = useState<User | null>(null)
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -48,50 +41,53 @@ export default function CreateJobPage() {
   })
 
   useEffect(() => {
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        const uid = data.session?.user?.id ?? null
+        if (!uid) {
+          router.push('/login?redirect=/dashboard/business/jobs/create')
+          return
+        }
 
-    if (!token || !email) {
-      router.push('/login')
-      return
+        // Determine business profile (schema-tolerant)
+        const selectors = ['id, name', 'id, company_name', 'id, business_name']
+        let row: any = null
+        for (const sel of selectors) {
+          const res: any = await (supabase.from('business_profiles').select(sel) as any).eq('user_id', uid).maybeSingle()
+          if (!res.error && res.data) {
+            row = res.data
+            break
+          }
+        }
+
+        if (!row) {
+          router.push('/dashboard/business')
+          return
+        }
+
+        if (cancelled) return
+        setBusinessProfile({
+          id: String(row.id),
+          name:
+            (typeof row.name === 'string' && row.name) ||
+            (typeof row.company_name === 'string' && row.company_name) ||
+            (typeof row.business_name === 'string' && row.business_name) ||
+            null,
+        })
+      } catch (e) {
+        console.error('Error loading business profile:', e)
+        router.push('/login?redirect=/dashboard/business/jobs/create')
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
-
-    fetchUserInfo(email)
   }, [router])
-
-  const fetchUserInfo = async (email: string) => {
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const userResponse = await axios.get(`${apiUrl}/api/auth/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
-      })
-      setUser(userResponse.data)
-
-      if (userResponse.data.user_type !== 'business') {
-        router.push('/dashboard/talent')
-        return
-      }
-
-      // Fetch business profile
-      const businessResponse = await axios.get(`${apiUrl}/api/business/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
-        }
-      })
-      if (businessResponse.data) {
-        setBusinessProfile(businessResponse.data)
-      }
-    } catch (error) {
-      console.error('Error fetching user info:', error)
-      router.push('/login')
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target
@@ -125,8 +121,6 @@ export default function CreateJobPage() {
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      
       // Parse skills from comma-separated strings
       const required_skills = formData.required_skills
         .split(',')
@@ -137,45 +131,58 @@ export default function CreateJobPage() {
         .map(s => s.trim())
         .filter(s => s.length > 0)
 
-      const response = await axios.post(
-        `${apiUrl}/api/jobs`,
-        {
-          business_profile_id: businessProfile.id,
-          title: formData.title,
-          description: formData.description || null,
-          requirements: formData.requirements || null,
-          responsibilities: formData.responsibilities || null,
-          employment_type: formData.employment_type,
-          salary_min: formData.salary_min ? parseFloat(formData.salary_min) : null,
-          salary_max: formData.salary_max ? parseFloat(formData.salary_max) : null,
-          salary_currency: formData.salary_currency,
-          remote_allowed: formData.remote_allowed,
-          city: formData.city || null,
-          state: formData.state || null,
-          country: formData.country || null,
-          location: formData.location || null,
-          required_skills: required_skills,
-          preferred_skills: preferred_skills,
-          experience_level: formData.experience_level || null,
-          education_level: formData.education_level || null,
-          status: formData.status,
-          application_url: formData.application_url || null,
-          application_email: formData.application_email || null
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`
-          }
-        }
-      )
-
-      if (response.data.success) {
-        router.push('/dashboard/business')
+      const basePayload: any = {
+        title: formData.title,
+        description: formData.description || null,
+        requirements: formData.requirements || null,
+        responsibilities: formData.responsibilities || null,
+        employment_type: formData.employment_type,
+        salary_min: formData.salary_min ? parseFloat(formData.salary_min) : null,
+        salary_max: formData.salary_max ? parseFloat(formData.salary_max) : null,
+        salary_currency: formData.salary_currency,
+        remote_allowed: formData.remote_allowed,
+        city: formData.city || null,
+        state: formData.state || null,
+        country: formData.country || null,
+        location: formData.location || null,
+        required_skills,
+        preferred_skills,
+        experience_level: formData.experience_level || null,
+        education_level: formData.education_level || null,
+        status: formData.status,
+        application_url: formData.application_url || null,
+        application_email: formData.application_email || null,
       }
+
+      const candidates = [
+        { business_profile_id: businessProfile.id, ...basePayload },
+        { business_id: businessProfile.id, ...basePayload },
+        { company_id: businessProfile.id, ...basePayload },
+        basePayload, // last resort if schema doesn't include a business foreign key
+      ]
+
+      let lastErr: any = null
+      for (const payload of candidates) {
+        const ins: any = await supabase.from('jobs').insert(payload as any).select('id').maybeSingle()
+        if (!ins.error) {
+          router.push('/dashboard/business')
+          return
+        }
+        lastErr = ins.error
+        const msg = String(ins.error?.message ?? '')
+        const code = String(ins.error?.code ?? '')
+        const isMissingCol = code === 'PGRST204' || /Could not find the .* column/i.test(msg)
+        if (isMissingCol) continue
+        break
+      }
+
+      setErrors({
+        submit: lastErr?.message || 'Failed to create job. Please ensure your Supabase schema has a jobs table.',
+      })
     } catch (error: any) {
       console.error('Error creating job:', error)
       setErrors({
-        submit: error.response?.data?.detail || 'Failed to create job. Please try again.'
+        submit: error?.message || 'Failed to create job. Please try again.'
       })
     } finally {
       setIsSubmitting(false)

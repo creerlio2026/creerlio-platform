@@ -19,6 +19,7 @@ type TabType = 'overview' | 'profile' | 'portfolio' | 'applications' | 'messages
 export default function TalentDashboard() {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
+  const [userFirstName, setUserFirstName] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [talentProfile, setTalentProfile] = useState<any>(null)
   const [applications, setApplications] = useState<any[]>([])
@@ -67,6 +68,12 @@ export default function TalentDashboard() {
   const [msgBody, setMsgBody] = useState('')
   const didAutoLoadMessagesRef = useRef(false)
 
+  // Portfolio view state
+  const [portfolioLoading, setPortfolioLoading] = useState(false)
+  const [portfolioMeta, setPortfolioMeta] = useState<any>(null)
+  const [portfolioBannerUrl, setPortfolioBannerUrl] = useState<string | null>(null)
+  const [portfolioAvatarUrl, setPortfolioAvatarUrl] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     async function boot() {
@@ -74,12 +81,16 @@ export default function TalentDashboard() {
       try {
         const { data: sessionRes } = await supabase.auth.getSession()
         const u = sessionRes.session?.user
+        // Debug logging disabled - uncomment and set NEXT_PUBLIC_DEBUG_LOG_ENABLED=true to enable
+        // debugLog({ location: 'dashboard/talent/page.tsx:boot:session', message: 'Session check', data: { hasSession: !!sessionRes.session, hasUser: !!u, userId: u?.id ?? null, userEmail: u?.email ?? null, userIdType: typeof u?.id }, hypothesisId: 'H1' })
         if (!u?.id) {
           router.replace('/login?redirect=/dashboard/talent')
           return
         }
         const email = u.email || ''
         const username = email ? email.split('@')[0] : 'talent'
+        // Debug logging disabled
+        // debugLog({ location: 'dashboard/talent/page.tsx:boot:user_set', message: 'Setting user state', data: { userId: u.id, email, username, userIdType: typeof u.id }, hypothesisId: 'H1' })
         if (!cancelled) {
           setUser({
             id: u.id,
@@ -92,12 +103,52 @@ export default function TalentDashboard() {
           setUserType('talent')
         }
 
+        // CRITICAL: Check user metadata to determine registration intent (most reliable source)
+        // Get fresh user data to ensure we have latest metadata
+        const { data: { user: freshUser } } = await supabase.auth.getUser()
+        const userMetadata = (freshUser || u).user_metadata || {}
+        const registeredAsBusinessFromMetadata = userMetadata.registration_type === 'business' || userMetadata.registered_as === 'business'
+        
+        // Extract first name from user metadata (stored during registration)
+        const firstNameFromMetadata = userMetadata.first_name || userMetadata.firstName || null
+        if (!cancelled && firstNameFromMetadata) {
+          setUserFirstName(firstNameFromMetadata)
+        }
+        
+        // Check if user has business profile to prevent wrong access
+        const businessCheck = await supabase.from('business_profiles').select('id').eq('user_id', u.id).maybeSingle()
+        const hasBusinessProfile = !!businessCheck.data && !businessCheck.error
+
         // Load talent profile (schema-tolerant)
         const tpRes = await (supabase.from('talent_profiles').select('*') as any).eq('user_id', u.id).maybeSingle()
+        const hasTalentProfile = !!tpRes.data && !tpRes.error
+        // Debug logging disabled
+
+        // VALIDATION: Block/redirect if user registered as business (from metadata) OR has business profile but no talent profile
+        // User metadata is the most reliable indicator of registration intent - if metadata says business, redirect immediately
+        const hasBusinessNoTalent = hasBusinessProfile && !hasTalentProfile
+        
+        // Debug logging disabled
+        
+        // CRITICAL: If user registered as business (from metadata) OR has business profile but no talent profile, redirect to business dashboard
+        // User metadata is the source of truth - if they registered as business, they should NOT access talent dashboard
+        if ((hasBusinessNoTalent || registeredAsBusinessFromMetadata) && !cancelled) {
+          // Debug logging disabled
+          router.replace('/dashboard/business')
+          return
+        }
+
         if (!cancelled && !tpRes.error) {
           setTalentProfile(tpRes.data || null)
           if (tpRes.data?.name && typeof tpRes.data.name === 'string') {
             setUser((prev) => (prev ? { ...prev, full_name: tpRes.data.name } : prev))
+            // Extract first name from full name if not already set from metadata
+            if (!firstNameFromMetadata && tpRes.data.name) {
+              const nameParts = tpRes.data.name.trim().split(/\s+/)
+              if (nameParts.length > 0 && !cancelled) {
+                setUserFirstName(nameParts[0])
+              }
+            }
           }
         }
 
@@ -116,9 +167,7 @@ export default function TalentDashboard() {
   }, [router])
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:tabs',message:'Talent dashboard tabs state',data:{activeTab,tabs:['overview','profile','portfolio','applications','messages','connections']},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
+    // Debug logging disabled
   }, [activeTab])
 
   async function loadConnections() {
@@ -145,9 +194,7 @@ export default function TalentDashboard() {
           .order('created_at', { ascending: false })
 
       if (reqRes.error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:connections:error',message:'Connections query failed',data:{code:(reqRes.error as any)?.code ?? null,message:reqRes.error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CONNECT_ERR'})}).catch(()=>{});
-        // #endregion
+        // Debug logging disabled
         if (/Could not find the table/i.test(reqRes.error.message)) {
           setConnError(
             "Connections are not configured yet (missing table). Run Supabase migration `2025122203_talent_connection_requests.sql` and refresh the schema cache, then reload."
@@ -331,9 +378,7 @@ export default function TalentDashboard() {
     if (activeTab !== 'messages') return
     if (didAutoLoadMessagesRef.current) return
     didAutoLoadMessagesRef.current = true
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:auto_load',message:'Auto-loading messaging on Messages tab open',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
+    // Debug logging disabled
     loadMessaging()
   }, [activeTab])
 
@@ -345,6 +390,64 @@ export default function TalentDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
+  // Load portfolio data when portfolio tab is active
+  useEffect(() => {
+    if (activeTab !== 'portfolio') return
+    if (!user?.id) return
+
+    let cancelled = false
+    const userId = user.id
+    async function loadPortfolio() {
+      setPortfolioLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from('talent_bank_items')
+          .select('id, metadata, created_at')
+          .eq('user_id', userId)
+          .eq('item_type', 'portfolio')
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        if (error) {
+            console.error('Error loading portfolio:', error)
+            if (!cancelled) setPortfolioMeta(null)
+            return
+          }
+
+        const saved = (data?.[0]?.metadata ?? null) as any
+        if (!cancelled) {
+          setPortfolioMeta(saved || null)
+        }
+
+        if (saved && typeof saved === 'object') {
+          const [b, a] = await Promise.all([
+            saved.banner_path ? (async () => {
+              const { data: bannerData } = await supabase.storage.from('talent-bank').createSignedUrl(saved.banner_path, 60 * 30)
+              return bannerData?.signedUrl ?? null
+            })() : Promise.resolve(null),
+            saved.avatar_path ? (async () => {
+              const { data: avatarData } = await supabase.storage.from('talent-bank').createSignedUrl(saved.avatar_path, 60 * 30)
+              return avatarData?.signedUrl ?? null
+            })() : Promise.resolve(null),
+          ])
+          if (!cancelled) {
+            setPortfolioBannerUrl(b)
+            setPortfolioAvatarUrl(a)
+          }
+        }
+      } catch (err) {
+        console.error('Error loading portfolio:', err)
+        if (!cancelled) setPortfolioMeta(null)
+      } finally {
+        if (!cancelled) setPortfolioLoading(false)
+      }
+    }
+    loadPortfolio()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, user?.id])
+
   // Legacy backend (axios) auth + profile fetch removed. Supabase session is now the source of truth.
 
   const loadMessaging = async () => {
@@ -355,9 +458,7 @@ export default function TalentDashboard() {
       const { data: sessionRes, error: sessionErr } = await supabase.auth.getSession()
       const hasSession = !!sessionRes?.session?.user?.id
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:load:session',message:'Messaging load: env/session check',data:{hasEnv,hasSession,hasSessionErr:!!sessionErr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
+      // Debug logging disabled
 
       if (!hasEnv) {
         setMsgError('Messaging is not configured (missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY).')
@@ -376,9 +477,7 @@ export default function TalentDashboard() {
         .eq('user_id', authedUserId)
         .single()
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:load:talent_profile',message:'Messaging load: talent profile lookup result',data:{ok:!talentRes.error,hasData:!!talentRes.data,errCode:talentRes.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
+      // Debug logging disabled
 
       if (talentRes.error || !talentRes.data?.id) {
         setMsgError('Messaging is unavailable (no talent profile for this signed-in user, or schema mismatch).')
@@ -395,9 +494,7 @@ export default function TalentDashboard() {
         .is('revoked_at', null)
         .gt('expires_at', new Date().toISOString())
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:load:grants',message:'Messaging load: active grants query result',data:{ok:!grantsRes.error,count:(grantsRes.data||[]).length,errCode:grantsRes.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+      // Debug logging disabled
 
       if (grantsRes.error) {
         setMsgError('Could not load connections for messaging (permissions or schema issue).')
@@ -432,18 +529,14 @@ export default function TalentDashboard() {
             return { id: r.id, name: n }
           })
           bizRows = mapped
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:load:biz_fallback',message:'Business name selector succeeded',data:{selector:sel,count:mapped.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
+          // Debug logging disabled
           break
         }
         lastBizErr = attempt.error
       }
 
       if (!bizRows) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:load:biz_fallback_fail',message:'Business name selector failed for all fallbacks',data:{errCode:lastBizErr?.code,errMsg:lastBizErr?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
+        // Debug logging disabled
         setMsgError('Could not load business names (schema/RLS issue).')
         return
       }
@@ -555,9 +648,7 @@ export default function TalentDashboard() {
       const talentId = talentRes.data.id as string
       const businessId = msgSelectedBusinessId
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:send:start',message:'Send message attempt',data:{hasConversationId:!!msgConversationId,bodyLen:body.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      // Debug logging disabled
 
       // Permission gate (again, before write)
       const gateRes = await supabase
@@ -582,9 +673,7 @@ export default function TalentDashboard() {
           .select('id')
           .single()
 
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:send:create_conv',message:'Conversation create result',data:{ok:!createRes.error,errCode:createRes.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
+        // Debug logging disabled
 
         if (createRes.error) {
           // If unique constraint hit, load existing
@@ -615,9 +704,7 @@ export default function TalentDashboard() {
         .from('messages')
         .insert({ conversation_id: convId, sender_type: 'talent', sender_user_id: authedUserId, body })
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/page.tsx:messages:send:insert',message:'Message insert result',data:{ok:!insertRes.error,errCode:insertRes.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      // Debug logging disabled
 
       if (insertRes.error) {
         setMsgError('Could not send message (permissions or schema issue).')
@@ -654,6 +741,93 @@ export default function TalentDashboard() {
     router.push('/')
   }
 
+  const handleDeleteRegistration = async () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to delete your Talent account? This action cannot be undone. All your profile data, portfolio, and connections will be permanently deleted.'
+    )
+    
+    if (!confirmed) return
+
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession()
+      const userId = sessionRes.session?.user?.id
+      if (!userId) {
+        alert('No active session found.')
+        return
+      }
+
+      // Delete talent profile first
+      const { error: profileError } = await supabase
+        .from('talent_profiles')
+        .delete()
+        .eq('user_id', userId)
+
+      if (profileError) {
+        console.error('Error deleting talent profile:', profileError)
+        // Continue anyway - profile might not exist
+      }
+
+      // Delete auth account via backend API (requires admin privileges)
+      // This MUST succeed - if it fails, the user can still log in
+      const accessToken = sessionRes.session?.access_token
+      if (!accessToken) {
+        alert('Failed to delete account: missing access token. Please sign in again.')
+        return
+      }
+      
+      let deleteResponse
+      try {
+        deleteResponse = await fetch('/api/auth/delete-account', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ user_id: userId }),
+        })
+      } catch (fetchError: any) {
+        alert(`Failed to delete account: ${fetchError?.message || 'Failed to fetch'}. Please contact support.`)
+        return
+      }
+      
+      if (!deleteResponse.ok) {
+        const errorData = await deleteResponse.json().catch(() => ({}))
+        const errorMsg = errorData?.detail || errorData?.message || 'Unknown error'
+        console.error('Error deleting auth account:', errorData)
+        alert(`Failed to delete account: ${errorMsg}. The account may still exist. Please contact support.`)
+        return // Don't continue - deletion failed
+      }
+      
+      const deleteResult = await deleteResponse.json().catch(() => ({}))
+      if (!deleteResult.success) {
+        alert(`Account deletion may have failed: ${deleteResult.message || 'Unknown error'}. Please contact support.`)
+        return
+      }
+
+      // Clear localStorage
+      localStorage.removeItem('creerlio_active_role')
+      localStorage.removeItem('user_type')
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('user_email')
+
+      // Sign out
+      try {
+        await supabase.auth.signOut()
+      } catch (signOutError) {
+        // Ignore signOut errors - account is being deleted
+        console.log('Sign out attempted')
+      }
+
+      // Redirect to home
+      router.replace('/')
+      
+      alert('Your Talent account has been deleted successfully.')
+    } catch (error: any) {
+      console.error('Error deleting registration:', error)
+      alert(`Failed to delete account: ${error?.message || 'Unknown error'}. Please contact support.`)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
@@ -677,12 +851,18 @@ export default function TalentDashboard() {
         </Link>
         
         <div className="flex items-center space-x-4">
-          <span className="text-gray-300">Welcome, {user?.full_name || user?.username}</span>
+          <span className="text-gray-300">Welcome, {userFirstName || user?.full_name || user?.username}</span>
           <button
             onClick={handleLogout}
             className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
           >
             Logout
+          </button>
+          <button
+            onClick={handleDeleteRegistration}
+            className="px-4 py-2 border border-red-600 text-red-300 rounded-lg hover:bg-red-900/20 transition-colors"
+          >
+            Delete Registration
           </button>
         </div>
       </header>
@@ -707,7 +887,7 @@ export default function TalentDashboard() {
                     : 'text-gray-400 hover:text-gray-300'
                 }`}
               >
-                {tab === 'connections' ? 'Connections' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'connections' ? 'Connections' : tab === 'portfolio' ? 'View Portfolio' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 {activeTab === tab && (
                   <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></span>
                 )}
@@ -904,42 +1084,165 @@ export default function TalentDashboard() {
         )}
 
         {activeTab === 'portfolio' && (
-          <div className="dashboard-card rounded-xl p-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Portfolio</h2>
-            {talentProfile ? (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-4">Skills</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {talentProfile.skills?.map((skill: string, idx: number) => (
-                      <span key={idx} className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-sm">
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Location</h3>
-                  <p className="text-gray-300">{talentProfile.location || 'Not set'}</p>
-                </div>
-                <div className="pt-4 border-t border-gray-800">
-                  <Link
-                    href="/portfolio"
-                    className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                    >
-                      Edit Portfolio
-                    </Link>
-                </div>
+          <div className="space-y-6">
+            {/* Header with Edit button */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-white">Portfolio</h2>
+              <Link
+                href="/portfolio"
+                className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-semibold transition-colors"
+              >
+                Edit
+              </Link>
+            </div>
+
+            {portfolioLoading ? (
+              <div className="dashboard-card rounded-xl p-12 flex items-center justify-center">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : !portfolioMeta ? (
+              <div className="dashboard-card rounded-xl p-8 text-center">
+                <h3 className="text-xl font-bold text-white mb-2">No portfolio saved yet</h3>
+                <p className="text-gray-400 mb-6">
+                  Create your portfolio first, then come back here to review exactly what it looks like.
+                </p>
+                <Link
+                  href="/portfolio"
+                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-semibold"
+                >
+                  Build your portfolio
+                </Link>
               </div>
             ) : (
-              <div className="text-center py-12">
-                <p className="text-gray-400 mb-4">No portfolio created yet</p>
-                  <Link
-                    href="/portfolio"
-                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                  >
-                  Create Portfolio
-                  </Link>
+              <div className="space-y-6">
+                {/* Portfolio Header Section */}
+                <div className="dashboard-card rounded-xl overflow-hidden border border-gray-800">
+                  <div className="h-40 md:h-56 bg-slate-900 relative">
+                    {portfolioBannerUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={portfolioBannerUrl} alt="Banner" className="w-full h-full object-cover opacity-80" />
+                    ) : (
+                      <div className="w-full h-full bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(16,185,129,0.25),transparent_45%)]" />
+                    )}
+                  </div>
+                  <div className="p-6 md:p-8 flex items-start gap-5">
+                    <div className="shrink-0">
+                      {portfolioAvatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={portfolioAvatarUrl} alt="Avatar" className="w-20 h-20 rounded-2xl object-cover border border-white/10" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center font-bold text-xl text-white">
+                          {((typeof portfolioMeta?.name === 'string' && portfolioMeta.name) || 'Talent').slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-3xl font-bold truncate text-white">
+                        {(typeof portfolioMeta?.name === 'string' && portfolioMeta.name) || 'Talent'}
+                      </h3>
+                      <p className="text-gray-300 mt-1">
+                        {(typeof portfolioMeta?.title === 'string' && portfolioMeta.title) || 'Your Title'}
+                      </p>
+                      {portfolioMeta?.bio && typeof portfolioMeta.bio === 'string' && (
+                        <p className="text-gray-300 mt-4 leading-relaxed whitespace-pre-wrap">
+                          {portfolioMeta.bio}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Skills Section */}
+                {Array.isArray(portfolioMeta?.skills) && portfolioMeta.skills.length > 0 && (
+                  <div className="dashboard-card rounded-xl p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">Skills</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {portfolioMeta.skills.map((skill: string, idx: number) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-200 text-sm"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Experience Section */}
+                {Array.isArray(portfolioMeta?.experience) && portfolioMeta.experience.length > 0 && (
+                  <div className="dashboard-card rounded-xl p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">Experience</h3>
+                    <div className="space-y-3">
+                      {portfolioMeta.experience.map((e: any, idx: number) => (
+                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
+                          <div className="font-semibold text-white">{e?.role || e?.title || 'Role'}</div>
+                          <div className="text-gray-300 text-sm mt-1">
+                            {(e?.company || e?.organisation || 'Company') +
+                              (e?.startDate || e?.endDate ? ` • ${e?.startDate || ''} – ${e?.endDate || ''}` : '')}
+                          </div>
+                          {e?.description && (
+                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
+                              {e.description}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Education Section */}
+                {Array.isArray(portfolioMeta?.education) && portfolioMeta.education.length > 0 && (
+                  <div className="dashboard-card rounded-xl p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">Education</h3>
+                    <div className="space-y-3">
+                      {portfolioMeta.education.map((e: any, idx: number) => (
+                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
+                          <div className="font-semibold text-white">{e?.qualification || e?.degree || 'Qualification'}</div>
+                          <div className="text-gray-300 text-sm mt-1">
+                            {(e?.institution || e?.school || 'Institution') +
+                              (e?.year || e?.endYear ? ` • ${e?.year || e?.endYear}` : '')}
+                          </div>
+                          {e?.notes && (
+                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
+                              {e.notes}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Projects Section */}
+                {Array.isArray(portfolioMeta?.projects) && portfolioMeta.projects.length > 0 && (
+                  <div className="dashboard-card rounded-xl p-6">
+                    <h3 className="text-xl font-semibold text-white mb-4">Projects</h3>
+                    <div className="space-y-3">
+                      {portfolioMeta.projects.map((p: any, idx: number) => (
+                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
+                          <div className="font-semibold text-white">{p?.name || 'Project'}</div>
+                          {p?.url && (
+                            <a
+                              className="text-blue-300 hover:text-blue-200 text-sm mt-1 inline-block"
+                              href={p.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {p.url}
+                            </a>
+                          )}
+                          {p?.description && (
+                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
+                              {p.description}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -77,6 +77,26 @@ export default function TalentBankPage() {
   const [credNotes, setCredNotes] = useState('')
 
   const [editEntry, setEditEntry] = useState<null | { item: TalentBankItem; draft: any }>(null)
+  const [autoSelectAfterEditId, setAutoSelectAfterEditId] = useState<number | null>(null)
+  const [socialParseModal, setSocialParseModal] = useState<{
+    open: boolean
+    parsing: boolean
+    item: TalentBankItem | null
+    platform: string
+    url: string
+    message?: string | null
+    projects: Array<{ name: string; description?: string; url: string; stars?: number }>
+    selectedProjectIdx: Set<number>
+  }>({
+    open: false,
+    parsing: false,
+    item: null,
+    platform: '',
+    url: '',
+    message: null,
+    projects: [],
+    selectedProjectIdx: new Set(),
+  })
 
   // Social links
   const [socialPlatform, setSocialPlatform] = useState('LinkedIn')
@@ -94,6 +114,75 @@ export default function TalentBankPage() {
   const [recPreviewUrl, setRecPreviewUrl] = useState<string | null>(null)
   const [recMime, setRecMime] = useState<string>('video/webm')
   const liveVideoRef = useRef<HTMLVideoElement | null>(null)
+
+  // Resume parsing state
+  const [resumeParseModal, setResumeParseModal] = useState<{
+    open: boolean
+    filename: string
+    tab: 'experience' | 'skills' | 'education' | 'credentials' | 'referees' | 'social'
+    experiences: Array<{
+      company: string
+      title: string
+      start_date: string
+      end_date: string
+      description: string
+      achievements: string[]
+    }>
+    skills: string[]
+    education: Array<{
+      institution: string
+      degree?: string
+      course?: string
+      field?: string
+      year?: string
+      notes?: string
+    }>
+    credentials: Array<{
+      name: string
+      issuer?: string
+      credentialId?: string
+      expiry?: string
+      notes?: string
+    }>
+    socialLinks: Array<{
+      platform: string
+      url: string
+    }>
+    referees: Array<{
+      name: string
+      relationship?: string
+      company?: string
+      title?: string
+      email?: string
+      phone?: string
+      notes?: string
+    }>
+    selectedExperienceIndices: Set<number>
+    selectedSkillIndices: Set<number>
+    selectedEducationIndices: Set<number>
+    selectedCredentialIndices: Set<number>
+    selectedRefereeIndices: Set<number>
+    selectedSocialIndices: Set<number>
+    parsing: boolean
+    filePath?: string
+  }>({
+    open: false,
+    filename: '',
+    tab: 'experience',
+    experiences: [],
+    skills: [],
+    education: [],
+    credentials: [],
+    socialLinks: [],
+    referees: [],
+    selectedExperienceIndices: new Set(),
+    selectedSkillIndices: new Set(),
+    selectedEducationIndices: new Set(),
+    selectedCredentialIndices: new Set(),
+    selectedRefereeIndices: new Set(),
+    selectedSocialIndices: new Set(),
+    parsing: false,
+  })
 
   // #region agent log
   function agentDbg(hypothesisId: string, message: string, data: any) {
@@ -122,6 +211,7 @@ export default function TalentBankPage() {
     // #endregion agent log
     ensureSessionAndRefresh()
     return () => {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -416,12 +506,16 @@ export default function TalentBankPage() {
     if (file.size > MAX_UPLOAD_BYTES) {
       const sizeMb = Math.round((file.size / (1024 * 1024)) * 10) / 10
       const limitMb = Math.round((MAX_UPLOAD_BYTES / (1024 * 1024)) * 10) / 10
-      setUploadError(`“${file.name}” is ${sizeMb}MB, which exceeds this app’s current upload limit (~${limitMb}MB).`)
+      setUploadError(`"${file.name}" is ${sizeMb}MB, which exceeds this app's current upload limit (~${limitMb}MB).`)
       // #region agent log
       agentDbg('TB_REC_5', 'uploadSingleFile blocked (too large)', { source: opts?.source ?? 'file', bytes: file.size })
       // #endregion agent log
       return
     }
+
+    // Check if file is a resume (PDF, DOC, DOCX, TXT, RTF)
+    const extension = file.name.toLowerCase().split('.').pop() || ''
+    const isResume = ['pdf', 'doc', 'docx', 'txt', 'rtf'].includes(extension)
 
     const path = `${uid}/${crypto.randomUUID()}-${file.name}`
     const { error: storageError } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false, contentType: file.type })
@@ -431,9 +525,10 @@ export default function TalentBankPage() {
       fileSize: file.size,
       fileType: file.type,
       source: opts?.source ?? 'file',
+      isResume,
     })
     // #region agent log
-    agentDbg('TB_REC_5', 'storage upload result', { hasError: !!storageError, source: opts?.source ?? 'file' })
+    agentDbg('TB_REC_5', 'storage upload result', { hasError: !!storageError, source: opts?.source ?? 'file', isResume })
     // #endregion agent log
     if (storageError) {
       const msg = (storageError as any)?.message ?? 'Upload failed'
@@ -457,6 +552,7 @@ export default function TalentBankPage() {
         file_kind: file.type.startsWith('image') ? 'image' : file.type.startsWith('video') ? 'video' : 'document',
         category,
         source: opts?.source ?? 'file',
+        isResume,
       },
       is_public: false,
     }
@@ -492,7 +588,435 @@ export default function TalentBankPage() {
       return
     }
 
+    // If it's a resume, trigger parsing
+    if (isResume && category === 'document') {
+      await parseResumeAndShowModal(file, path, uid)
+    }
+
     await refreshItems(uid)
+  }
+
+  function isResumeFile(filename: string): boolean {
+    if (!filename) return false
+    const lowerName = filename.toLowerCase()
+    const extension = lowerName.split('.').pop() || ''
+    // Check both extension and common resume keywords in filename
+    const isResumeExtension = ['pdf', 'doc', 'docx', 'txt', 'rtf'].includes(extension)
+    const hasResumeKeyword = lowerName.includes('resume') || lowerName.includes('cv') || lowerName.includes('curriculum')
+    return isResumeExtension || hasResumeKeyword
+  }
+
+  async function parseResumeFromItem(item: TalentBankItem) {
+    if (!item.file_path || !userId) {
+      console.error('Cannot parse resume: missing file_path or userId', { file_path: item.file_path, userId })
+      setUploadError('Cannot parse resume: Please ensure you are signed in and the file exists.')
+      return
+    }
+    
+    console.log('Starting resume parse for:', item.title, item.file_path)
+    setResumeParseModal(prev => ({ ...prev, parsing: true, open: true, filename: item.title, filePath: item.file_path || undefined }))
+    
+    try {
+      // Create a short-lived signed URL and parse via Next.js route (Node runtime)
+      const { data: urlData, error: urlErr } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(item.file_path, 60 * 10)
+
+      const signedUrl = urlData?.signedUrl ?? null
+      if (urlErr || !signedUrl) throw new Error('Failed to create signed URL for parsing')
+
+      const response = await fetch('/api/resume/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: signedUrl, fileType: item.file_type || 'application/pdf' }),
+      })
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        console.error('[Resume Parse] API not ok', { status: response.status, meta: error?.meta ?? null, error })
+        throw new Error(error?.error || error?.detail || 'Failed to parse resume')
+      }
+      
+      const data = await response.json().catch(() => ({}))
+      try {
+        console.log('[Resume Parse] meta', JSON.stringify(data?.meta ?? null))
+      } catch {
+        console.log('[Resume Parse] meta', data?.meta ?? null)
+      }
+      if (data?.meta && data.meta.openaiConfigured === false) {
+        console.warn('[Resume Parse] OpenAI not configured (OPENAI_API_KEY missing or not loaded).')
+      }
+      if (data?.meta?.openaiError) {
+        console.warn('[Resume Parse] OpenAI error:', data.meta.openaiError)
+      }
+      const parsed = data?.parsed
+      const exp = Array.isArray(parsed?.experience) ? parsed.experience : []
+      const experiences = exp.map((e: any) => ({
+        company: String(e?.company ?? 'Company'),
+        title: String(e?.title ?? 'Role'),
+        start_date: String(e?.startDate ?? ''),
+        end_date: String(e?.endDate ?? ''),
+        description: String(e?.description ?? ''),
+        achievements: Array.isArray(e?.achievements) ? e.achievements.map((a: any) => String(a)).filter(Boolean) : [],
+      }))
+      const skills = Array.isArray(parsed?.skills) ? parsed.skills.map((s: any) => String(s)).filter(Boolean) : []
+      const education = Array.isArray(parsed?.education) ? parsed.education : []
+      const credentials = Array.isArray(parsed?.credentials) ? parsed.credentials : []
+      const socialLinks = Array.isArray(parsed?.socialLinks) ? parsed.socialLinks : []
+      const referees = Array.isArray(parsed?.referees) ? parsed.referees : []
+
+      if (experiences.length > 0) {
+        setResumeParseModal(prev => ({
+          ...prev,
+          parsing: false,
+          tab: 'experience',
+          experiences,
+          skills,
+          education,
+          credentials,
+          socialLinks,
+          referees,
+          selectedExperienceIndices: new Set(experiences.map((_: any, i: number) => i)),
+          selectedSkillIndices: new Set(skills.map((_: any, i: number) => i)),
+          selectedEducationIndices: new Set(education.map((_: any, i: number) => i)),
+          selectedCredentialIndices: new Set(credentials.map((_: any, i: number) => i)),
+          selectedSocialIndices: new Set(socialLinks.map((_: any, i: number) => i)),
+          selectedRefereeIndices: new Set(referees.map((_: any, i: number) => i)),
+        }))
+      } else {
+        setResumeParseModal(prev => ({
+          ...prev,
+          parsing: false,
+          tab: 'experience',
+          experiences: [],
+          skills,
+          education,
+          credentials,
+          socialLinks,
+          referees,
+          selectedExperienceIndices: new Set(),
+          selectedSkillIndices: new Set(skills.map((_: any, i: number) => i)),
+          selectedEducationIndices: new Set(education.map((_: any, i: number) => i)),
+          selectedCredentialIndices: new Set(credentials.map((_: any, i: number) => i)),
+          selectedSocialIndices: new Set(socialLinks.map((_: any, i: number) => i)),
+          selectedRefereeIndices: new Set(referees.map((_: any, i: number) => i)),
+        }))
+        setUploadError('No job experiences found in resume. You can still add experiences manually.')
+      }
+    } catch (error: any) {
+      console.error('Resume parsing error:', error)
+      setResumeParseModal(prev => ({ ...prev, parsing: false }))
+      setUploadError(`Failed to parse resume: ${error.message || 'Unknown error'}`)
+    }
+  }
+
+  async function parseResumeAndShowModal(file: File, filePath: string, uid: string) {
+    setResumeParseModal(prev => ({ ...prev, parsing: true, open: true, filename: file.name, filePath }))
+    
+    try {
+      // Parse using the stored file via a signed URL (avoid uploading raw file to server)
+      const { data: urlData, error: urlErr } = await supabase.storage.from(BUCKET).createSignedUrl(filePath, 60 * 10)
+      const signedUrl = urlData?.signedUrl ?? null
+      if (urlErr || !signedUrl) throw new Error('Failed to create signed URL for parsing')
+
+      const response = await fetch('/api/resume/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: signedUrl, fileType: file.type || 'application/pdf' }),
+      })
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        console.error('[Resume Parse] API not ok', { status: response.status, meta: error?.meta ?? null, error })
+        throw new Error(error?.error || error?.detail || 'Failed to parse resume')
+      }
+      
+      const data = await response.json().catch(() => ({}))
+      try {
+        console.log('[Resume Parse] meta', JSON.stringify(data?.meta ?? null))
+      } catch {
+        console.log('[Resume Parse] meta', data?.meta ?? null)
+      }
+      if (data?.meta && data.meta.openaiConfigured === false) {
+        console.warn('[Resume Parse] OpenAI not configured (OPENAI_API_KEY missing or not loaded).')
+      }
+      if (data?.meta?.openaiError) {
+        console.warn('[Resume Parse] OpenAI error:', data.meta.openaiError)
+      }
+      const parsed = data?.parsed
+      const exp = Array.isArray(parsed?.experience) ? parsed.experience : []
+      const experiences = exp.map((e: any) => ({
+        company: String(e?.company ?? 'Company'),
+        title: String(e?.title ?? 'Role'),
+        start_date: String(e?.startDate ?? ''),
+        end_date: String(e?.endDate ?? ''),
+        description: String(e?.description ?? ''),
+        achievements: Array.isArray(e?.achievements) ? e.achievements.map((a: any) => String(a)).filter(Boolean) : [],
+      }))
+      const skills = Array.isArray(parsed?.skills) ? parsed.skills.map((s: any) => String(s)).filter(Boolean) : []
+      const education = Array.isArray(parsed?.education) ? parsed.education : []
+      const credentials = Array.isArray(parsed?.credentials) ? parsed.credentials : []
+      const socialLinks = Array.isArray(parsed?.socialLinks) ? parsed.socialLinks : []
+      const referees = Array.isArray(parsed?.referees) ? parsed.referees : []
+
+      if (experiences.length > 0) {
+        setResumeParseModal(prev => ({
+          ...prev,
+          parsing: false,
+          tab: 'experience',
+          experiences,
+          skills,
+          education,
+          credentials,
+          socialLinks,
+          referees,
+          selectedExperienceIndices: new Set(experiences.map((_: any, i: number) => i)),
+          selectedSkillIndices: new Set(skills.map((_: any, i: number) => i)),
+          selectedEducationIndices: new Set(education.map((_: any, i: number) => i)),
+          selectedCredentialIndices: new Set(credentials.map((_: any, i: number) => i)),
+          selectedSocialIndices: new Set(socialLinks.map((_: any, i: number) => i)),
+          selectedRefereeIndices: new Set(referees.map((_: any, i: number) => i)),
+        }))
+      } else {
+        setResumeParseModal(prev => ({
+          ...prev,
+          parsing: false,
+          tab: 'experience',
+          experiences: [],
+          skills,
+          education,
+          credentials,
+          socialLinks,
+          referees,
+          selectedExperienceIndices: new Set(),
+          selectedSkillIndices: new Set(skills.map((_: any, i: number) => i)),
+          selectedEducationIndices: new Set(education.map((_: any, i: number) => i)),
+          selectedCredentialIndices: new Set(credentials.map((_: any, i: number) => i)),
+          selectedSocialIndices: new Set(socialLinks.map((_: any, i: number) => i)),
+          selectedRefereeIndices: new Set(referees.map((_: any, i: number) => i)),
+        }))
+        setUploadError('No job experiences found in resume. You can still add experiences manually.')
+      }
+    } catch (error: any) {
+      console.error('Resume parsing error:', error)
+      setResumeParseModal(prev => ({ ...prev, parsing: false }))
+      setUploadError(`Failed to parse resume: ${error.message || 'Unknown error'}`)
+    }
+  }
+
+  async function addSelectedExperiencesToPortfolio() {
+    const {
+      selectedExperienceIndices,
+      selectedSkillIndices,
+      selectedEducationIndices,
+      selectedCredentialIndices,
+      selectedRefereeIndices,
+      selectedSocialIndices,
+      experiences,
+      skills,
+      education,
+      credentials,
+      socialLinks,
+      referees,
+      filePath,
+    } = resumeParseModal
+    if (!userId) return
+    const totalSelected =
+      selectedExperienceIndices.size +
+      selectedSkillIndices.size +
+      selectedEducationIndices.size +
+      selectedCredentialIndices.size +
+      selectedRefereeIndices.size +
+      selectedSocialIndices.size
+    if (totalSelected === 0) return
+
+    try {
+      const selectedExperiences = Array.from(selectedExperienceIndices).map((i) => experiences[i]).filter(Boolean)
+      const selectedSkills = Array.from(selectedSkillIndices).map((i) => skills[i]).filter(Boolean)
+      const selectedEducation = Array.from(selectedEducationIndices).map((i) => education[i]).filter(Boolean)
+      const selectedCredentials = Array.from(selectedCredentialIndices).map((i) => credentials[i]).filter(Boolean)
+      const selectedReferees = Array.from(selectedRefereeIndices).map((i) => referees[i]).filter(Boolean)
+      const selectedSocialLinks = Array.from(selectedSocialIndices).map((i) => socialLinks[i]).filter(Boolean)
+
+      // Ensure portfolio record exists (skills/referees live in portfolio metadata)
+      const ensurePortfolio = async () => {
+        const existing = await supabase
+          .from('talent_bank_items')
+          .select('id,metadata')
+          .eq('user_id', userId)
+          .eq('item_type', 'portfolio')
+          .order('created_at', { ascending: false })
+          .limit(1)
+        if (!existing.error && existing.data?.[0]?.id) {
+          return { id: existing.data[0].id as any, meta: (existing.data[0] as any)?.metadata ?? {} }
+        }
+        const ins = await supabase
+          .from('talent_bank_items')
+          .insert({
+            user_id: userId,
+            item_type: 'portfolio',
+            title: 'Portfolio',
+            metadata: { portfolioSelections: [], skills: [], referees: [], socialLinks: [] },
+            is_public: false,
+          } as any)
+          .select('id,metadata')
+        return { id: (ins.data as any)?.[0]?.id ?? null, meta: (ins.data as any)?.[0]?.metadata ?? {} }
+      }
+      const portfolioRow = await ensurePortfolio()
+      
+      for (const exp of selectedExperiences) {
+        const metadata = {
+          company: exp.company || '',
+          title: exp.title || '',
+          startDate: exp.start_date || '',
+          endDate: exp.end_date || '',
+          description: exp.description || '',
+          achievements: Array.isArray(exp.achievements) ? exp.achievements : [],
+          sourceResume: filePath || null,
+        }
+        
+        const title = `${exp.title || 'Position'} at ${exp.company || 'Company'}`
+        
+        const { error } = await supabase.from('talent_bank_items').insert({
+          user_id: userId,
+          item_type: 'experience',
+          title,
+          description: exp.description || '',
+          metadata,
+          is_public: false,
+        } as any)
+        
+        if (error) {
+          console.error('Error creating experience entry:', error)
+        }
+      }
+
+      for (const edu of selectedEducation) {
+        const title = `${edu.institution || 'Institution'} — ${edu.degree || edu.course || 'Education'}`
+        const metadata = {
+          institution: edu.institution || '',
+          degree: edu.degree || '',
+          course: edu.course || '',
+          field: edu.field || '',
+          year: edu.year || '',
+          notes: edu.notes || '',
+          sourceResume: filePath || null,
+        }
+        const { error } = await supabase.from('talent_bank_items').insert({
+          user_id: userId,
+          item_type: 'education',
+          title,
+          metadata,
+          is_public: false,
+        } as any)
+        if (error) console.error('Error creating education entry:', error)
+      }
+
+      for (const c of selectedCredentials) {
+        const title = `${c.name || 'Credential'}${c.issuer ? ` — ${c.issuer}` : ''}`
+        const metadata = { ...c, sourceResume: filePath || null }
+        const { error } = await supabase.from('talent_bank_items').insert({
+          user_id: userId,
+          item_type: 'credential',
+          title,
+          metadata,
+          is_public: false,
+        } as any)
+        if (error) console.error('Error creating credential entry:', error)
+      }
+
+      for (const s of selectedSocialLinks) {
+        const platform = String((s as any)?.platform ?? '').trim() || 'Social'
+        const url = String((s as any)?.url ?? '').trim()
+        if (!url) continue
+        const title = platform
+        const metadata = { platform, url, sourceResume: filePath || null }
+        const { error } = await supabase.from('talent_bank_items').insert({
+          user_id: userId,
+          item_type: 'social',
+          title,
+          metadata,
+          is_public: false,
+        } as any)
+        if (error) console.error('Error creating social entry:', error)
+      }
+
+      // Merge skills/referees/social into portfolio metadata (dedupe lightly)
+      if (portfolioRow?.id) {
+        const prevMeta = (portfolioRow.meta && typeof portfolioRow.meta === 'object') ? portfolioRow.meta : {}
+        const prevSkills: string[] = Array.isArray(prevMeta.skills) ? prevMeta.skills : []
+        const mergedSkills = [...prevSkills]
+        for (const s of selectedSkills) {
+          const v = String(s || '').trim()
+          if (!v) continue
+          if (!mergedSkills.some((x) => (x || '').toLowerCase() === v.toLowerCase())) mergedSkills.push(v)
+        }
+
+        const prevSocial: any[] = Array.isArray(prevMeta.socialLinks) ? prevMeta.socialLinks : []
+        const mergedSocial = [...prevSocial]
+        for (const s of selectedSocialLinks) {
+          const platform = String((s as any)?.platform ?? '').trim()
+          const url = String((s as any)?.url ?? '').trim()
+          if (!platform || !url) continue
+          const exists = mergedSocial.some((x: any) => {
+            const xp = String(x?.platform ?? '').trim().toLowerCase()
+            const xu = String(x?.url ?? '').trim().toLowerCase()
+            return xp === platform.toLowerCase() && xu === url.toLowerCase()
+          })
+          if (!exists) mergedSocial.push({ platform, url })
+        }
+
+        const prevRefs: any[] = Array.isArray(prevMeta.referees) ? prevMeta.referees : []
+        const mergedRefs = [...prevRefs]
+        for (const r of selectedReferees) {
+          const name = String((r as any)?.name ?? '').trim()
+          if (!name) continue
+          const email = String((r as any)?.email ?? '').trim().toLowerCase()
+          const phone = String((r as any)?.phone ?? '').trim()
+          const exists = mergedRefs.some((x: any) => {
+            const xn = String(x?.name ?? '').trim().toLowerCase()
+            const xe = String(x?.email ?? '').trim().toLowerCase()
+            const xp = String(x?.phone ?? '').trim()
+            if (email && xe && xe === email) return true
+            if (phone && xp && xp === phone) return true
+            return xn === name.toLowerCase()
+          })
+          if (!exists) mergedRefs.push(r)
+        }
+
+        const nextMeta = {
+          ...prevMeta,
+          skills: mergedSkills,
+          referees: mergedRefs,
+          socialLinks: mergedSocial,
+          resumeParsedAt: Date.now(),
+        }
+        await supabase.from('talent_bank_items').update({ metadata: nextMeta }).eq('id', portfolioRow.id).eq('user_id', userId)
+      }
+      
+      setResumeParseModal({
+        open: false,
+        filename: '',
+        tab: 'experience',
+        experiences: [],
+        skills: [],
+        education: [],
+        credentials: [],
+        socialLinks: [],
+        referees: [],
+        selectedExperienceIndices: new Set(),
+        selectedSkillIndices: new Set(),
+        selectedEducationIndices: new Set(),
+        selectedCredentialIndices: new Set(),
+        selectedRefereeIndices: new Set(),
+        selectedSocialIndices: new Set(),
+        parsing: false,
+      })
+      await refreshItems(userId)
+    } catch (error: any) {
+      console.error('Error adding experiences:', error)
+      setUploadError(`Failed to add experiences: ${error.message || 'Unknown error'}`)
+    }
   }
 
   async function log(message: string, hypothesisId: string, data: any) {
@@ -518,13 +1042,22 @@ export default function TalentBankPage() {
     // Prefer session (fast) over getUser() which may require network.
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
     const sessionUserId = sessionData?.session?.user?.id ?? null
+    const sessionEmail = sessionData?.session?.user?.email ?? null
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/bank/page.tsx:ensureSession:session',message:'Session check',data:{hasSession:!!sessionData?.session,hasUser:!!sessionUserId,userId:sessionUserId,userIdType:typeof sessionUserId,email:sessionEmail,hasError:!!sessionError,errorName:(sessionError as any)?.name??null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     await log('auth.getSession()', 'TB_SESSION', {
       hasSession: !!sessionData?.session,
       hasUser: !!sessionUserId,
       hasError: !!sessionError,
       errorName: (sessionError as any)?.name ?? null,
     })
-    if (sessionUserId) return sessionUserId
+    if (sessionUserId) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/bank/page.tsx:ensureSession:return',message:'Returning user ID',data:{userId:sessionUserId,userIdType:typeof sessionUserId,isEmail:sessionUserId?.includes?.('@')??false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+      // #endregion
+      return sessionUserId
+    }
 
     // Auto-create an anonymous session so the user can save/review/delete without a manual login flow.
     const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously()
@@ -590,10 +1123,25 @@ export default function TalentBankPage() {
 
     const uid = uidArg ?? userId ?? (await ensureSession())
     setUserId(uid)
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/bank/page.tsx:refreshItems:uid',message:'User ID for query',data:{uid,uidType:typeof uid,uidLength:uid?.length??null,isEmail:uid?.includes?.('@')??false},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     if (!uid) {
       await log('refreshItems aborted (no user id)', 'TB_LIST', { reason: 'no-session' })
       setItems([])
       setIsLoading(false)
+      return
+    }
+
+    // DEFENSIVE: Prevent email from being used as user_id
+    if (uid.includes('@')) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/bank/page.tsx:refreshItems:email_check',message:'BLOCKED: Email used as user_id',data:{uid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
+      await log('refreshItems blocked: email used as user_id', 'TB_LIST', { uid, reason: 'email-instead-of-uuid' })
+      setItems([])
+      setIsLoading(false)
+      setUploadError('Invalid user ID format. Please sign out and sign in again.')
       return
     }
 
@@ -602,6 +1150,9 @@ export default function TalentBankPage() {
       .select('*')
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/talent/bank/page.tsx:refreshItems:query',message:'Talent bank query result',data:{uid,hasError:!!error,errorCode:(error as any)?.code??null,errorMessage:(error as any)?.message??null,rowCount:Array.isArray(data)?data.length:0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
 
     await log('list talent_bank_items', 'TB_LIST', {
       hasError: !!error,
@@ -1288,9 +1839,95 @@ export default function TalentBankPage() {
     })
 
     if (!error) {
+      if (autoSelectAfterEditId === editEntry.item.id) {
+        await toggleInPortfolio(editEntry.item, true)
+        setAutoSelectAfterEditId(null)
+      }
       setEditEntry(null)
       await refreshItems(uid)
     }
+  }
+
+  async function parseSocialFromItem(item: TalentBankItem) {
+    const url = getSocialUrl(item)
+    if (!url) {
+      alert('This social item has no URL to parse.')
+      return
+    }
+    setSocialParseModal({
+      open: true,
+      parsing: true,
+      item,
+      platform: item.title || (item.metadata as any)?.platform || 'Social',
+      url,
+      message: null,
+      projects: [],
+      selectedProjectIdx: new Set(),
+    })
+    try {
+      const res = await fetch('/api/social/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const j = await res.json().catch(() => null)
+      const parsed = j?.parsed
+      const projects = Array.isArray(parsed?.projects) ? parsed.projects : []
+      const message = typeof parsed?.message === 'string' ? parsed.message : null
+      setSocialParseModal((p) => ({
+        ...p,
+        parsing: false,
+        platform: String(parsed?.platform ?? p.platform),
+        url: String(parsed?.url ?? p.url),
+        message,
+        projects,
+        selectedProjectIdx: new Set(projects.map((_: any, i: number) => i)),
+      }))
+    } catch (e: any) {
+      setSocialParseModal((p) => ({ ...p, parsing: false, message: e?.message ?? String(e) }))
+    }
+  }
+
+  async function importParsedSocial() {
+    const uid = userId ?? (await ensureSession())
+    setUserId(uid)
+    if (!uid) return
+    if (!socialParseModal.item) return
+
+    // Always select the social link itself in portfolio (same convenience as resume).
+    await toggleInPortfolio(socialParseModal.item, true)
+
+    // Import GitHub repos (or any parsed projects) into Portfolio metadata projects[].
+    const selected = Array.from(socialParseModal.selectedProjectIdx)
+      .map((i) => socialParseModal.projects[i])
+      .filter(Boolean)
+
+    if (selected.length === 0) {
+      setSocialParseModal((p) => ({ ...p, open: false }))
+      return
+    }
+
+    const row = (portfolioRow && portfolioRow.id) ? portfolioRow : await ensurePortfolioRow(uid)
+    if (!row?.id) return
+    const prevMeta = (row as any)?.metadata ?? {}
+    const prevProjects: any[] = Array.isArray(prevMeta?.projects) ? prevMeta.projects : []
+    const merged = [...prevProjects]
+
+    for (const pr of selected) {
+      const url = String((pr as any)?.url ?? '').trim()
+      const name = String((pr as any)?.name ?? '').trim()
+      const description = String((pr as any)?.description ?? '').trim()
+      if (!url || !name) continue
+      const exists = merged.some((x: any) => String(x?.url ?? '').trim().toLowerCase() === url.toLowerCase())
+      if (!exists) merged.push({ name, description, url })
+    }
+
+    const nextMeta = { ...prevMeta, projects: merged }
+    const { error } = await supabase.from('talent_bank_items').update({ metadata: nextMeta }).eq('id', row.id).eq('user_id', uid)
+    if (!error) {
+      setPortfolioRow({ ...(row as any), metadata: nextMeta })
+    }
+    setSocialParseModal((p) => ({ ...p, open: false }))
   }
 
   return (
@@ -1525,6 +2162,842 @@ export default function TalentBankPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {resumeParseModal.open && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setResumeParseModal(prev => ({ ...prev, open: false }))}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-full max-w-4xl bg-slate-950 border border-white/10 rounded-2xl overflow-hidden max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div className="font-semibold">
+                  {resumeParseModal.parsing ? 'Parsing Resume...' : `Import from ${resumeParseModal.filename}`}
+                </div>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+                  onClick={() => setResumeParseModal(prev => ({ ...prev, open: false }))}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                {resumeParseModal.parsing ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <div className="text-lg mb-2">AI is analyzing your resume...</div>
+                      <div className="text-sm text-slate-400">Extracting job experiences and details</div>
+                    </div>
+                  </div>
+                ) : (resumeParseModal.experiences.length +
+                    resumeParseModal.skills.length +
+                    resumeParseModal.education.length +
+                    resumeParseModal.credentials.length +
+                    resumeParseModal.referees.length) ===
+                  0 ? (
+                  <div className="text-center py-12">
+                    <div className="text-lg mb-2">Nothing found to import</div>
+                    <div className="text-sm text-slate-400">
+                      The resume text was parsed, but no Experience, Skills, Education, Credentials, or Referees were detected.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {(
+                        [
+                          { k: 'experience', label: `Experience (${resumeParseModal.experiences.length})` },
+                          { k: 'skills', label: `Skills (${resumeParseModal.skills.length})` },
+                          { k: 'education', label: `Education (${resumeParseModal.education.length})` },
+                          { k: 'credentials', label: `Credentials (${resumeParseModal.credentials.length})` },
+                          { k: 'referees', label: `Referees (${resumeParseModal.referees.length})` },
+                          { k: 'social', label: `Social (${resumeParseModal.socialLinks.length})` },
+                        ] as Array<{ k: any; label: string }>
+                      ).map((t) => (
+                        <button
+                          key={t.k}
+                          type="button"
+                          onClick={() => setResumeParseModal((p) => ({ ...p, tab: t.k }))}
+                          className={`px-3 py-1.5 rounded-lg border text-sm ${
+                            resumeParseModal.tab === t.k
+                              ? 'bg-blue-600/20 border-blue-500 text-blue-200'
+                              : 'bg-slate-900/40 border-slate-700 text-slate-300 hover:bg-slate-900/70'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {resumeParseModal.tab === 'skills' ? (
+                      <>
+                        {resumeParseModal.skills.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">No skills found.</div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between text-sm text-slate-300">
+                              <div>Select the skills to import. You can edit each skill before importing.</div>
+                              <button
+                                type="button"
+                                className="text-xs underline text-blue-300"
+                                onClick={() => {
+                                  const all = new Set(resumeParseModal.skills.map((_: any, i: number) => i))
+                                  const none = new Set<number>()
+                                  const allSelected = resumeParseModal.selectedSkillIndices.size === resumeParseModal.skills.length
+                                  setResumeParseModal((p) => ({ ...p, selectedSkillIndices: allSelected ? none : all }))
+                                }}
+                              >
+                                {resumeParseModal.selectedSkillIndices.size === resumeParseModal.skills.length ? 'Select none' : 'Select all'}
+                              </button>
+                            </div>
+
+                            <div className="space-y-2">
+                              {resumeParseModal.skills.map((s, idx) => (
+                                <div
+                                  key={`${s}-${idx}`}
+                                  className={`border rounded-xl p-3 flex items-center gap-3 ${
+                                    resumeParseModal.selectedSkillIndices.has(idx)
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={resumeParseModal.selectedSkillIndices.has(idx)}
+                                    onChange={(e) => {
+                                      const next = new Set(resumeParseModal.selectedSkillIndices)
+                                      if (e.target.checked) next.add(idx)
+                                      else next.delete(idx)
+                                      setResumeParseModal((p) => ({ ...p, selectedSkillIndices: next }))
+                                    }}
+                                  />
+                                  <input
+                                    type="text"
+                                    value={String(s ?? '')}
+                                    onChange={(e) => {
+                                      const v = e.target.value
+                                      setResumeParseModal((p) => {
+                                        const nextSkills = [...p.skills]
+                                        nextSkills[idx] = v
+                                        return { ...p, skills: nextSkills }
+                                      })
+                                    }}
+                                    className="flex-1 px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white placeholder:text-slate-500"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : resumeParseModal.tab === 'education' ? (
+                      <>
+                        {resumeParseModal.education.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">No education entries found.</div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between text-sm text-slate-300">
+                              <div>Select the education entries to import. You can edit each entry before importing.</div>
+                              <button
+                                type="button"
+                                className="text-xs underline text-blue-300"
+                                onClick={() => {
+                                  const all = new Set(resumeParseModal.education.map((_: any, i: number) => i))
+                                  const none = new Set<number>()
+                                  const allSelected = resumeParseModal.selectedEducationIndices.size === resumeParseModal.education.length
+                                  setResumeParseModal((p) => ({ ...p, selectedEducationIndices: allSelected ? none : all }))
+                                }}
+                              >
+                                {resumeParseModal.selectedEducationIndices.size === resumeParseModal.education.length ? 'Select none' : 'Select all'}
+                              </button>
+                            </div>
+                            <div className="space-y-3">
+                              {resumeParseModal.education.map((e, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`border rounded-xl p-4 ${
+                                    resumeParseModal.selectedEducationIndices.has(idx)
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1"
+                                      checked={resumeParseModal.selectedEducationIndices.has(idx)}
+                                      onChange={(ev) => {
+                                        const next = new Set(resumeParseModal.selectedEducationIndices)
+                                        if (ev.target.checked) next.add(idx)
+                                        else next.delete(idx)
+                                        setResumeParseModal((p) => ({ ...p, selectedEducationIndices: next }))
+                                      }}
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="grid md:grid-cols-2 gap-2">
+                                        <input
+                                          value={String(e?.institution ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.education]
+                                              next[idx] = { ...(next[idx] as any), institution: v }
+                                              return { ...p, education: next }
+                                            })
+                                          }}
+                                          placeholder="Institution"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(e?.degree ?? e?.course ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.education]
+                                              next[idx] = { ...(next[idx] as any), degree: v }
+                                              return { ...p, education: next }
+                                            })
+                                          }}
+                                          placeholder="Degree / Course"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(e?.field ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.education]
+                                              next[idx] = { ...(next[idx] as any), field: v }
+                                              return { ...p, education: next }
+                                            })
+                                          }}
+                                          placeholder="Field"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(e?.year ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.education]
+                                              next[idx] = { ...(next[idx] as any), year: v }
+                                              return { ...p, education: next }
+                                            })
+                                          }}
+                                          placeholder="Year"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                      </div>
+                                      <textarea
+                                        value={String(e?.notes ?? '')}
+                                        onChange={(ev) => {
+                                          const v = ev.target.value
+                                          setResumeParseModal((p) => {
+                                            const next = [...p.education]
+                                            next[idx] = { ...(next[idx] as any), notes: v }
+                                            return { ...p, education: next }
+                                          })
+                                        }}
+                                        placeholder="Notes"
+                                        rows={3}
+                                        className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : resumeParseModal.tab === 'credentials' ? (
+                      <>
+                        {resumeParseModal.credentials.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">No credentials found.</div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between text-sm text-slate-300">
+                              <div>Select credentials to import. You can edit each before importing.</div>
+                              <button
+                                type="button"
+                                className="text-xs underline text-blue-300"
+                                onClick={() => {
+                                  const all = new Set(resumeParseModal.credentials.map((_: any, i: number) => i))
+                                  const none = new Set<number>()
+                                  const allSelected = resumeParseModal.selectedCredentialIndices.size === resumeParseModal.credentials.length
+                                  setResumeParseModal((p) => ({ ...p, selectedCredentialIndices: allSelected ? none : all }))
+                                }}
+                              >
+                                {resumeParseModal.selectedCredentialIndices.size === resumeParseModal.credentials.length ? 'Select none' : 'Select all'}
+                              </button>
+                            </div>
+                            <div className="space-y-3">
+                              {resumeParseModal.credentials.map((c, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`border rounded-xl p-4 ${
+                                    resumeParseModal.selectedCredentialIndices.has(idx)
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1"
+                                      checked={resumeParseModal.selectedCredentialIndices.has(idx)}
+                                      onChange={(ev) => {
+                                        const next = new Set(resumeParseModal.selectedCredentialIndices)
+                                        if (ev.target.checked) next.add(idx)
+                                        else next.delete(idx)
+                                        setResumeParseModal((p) => ({ ...p, selectedCredentialIndices: next }))
+                                      }}
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="grid md:grid-cols-2 gap-2">
+                                        <input
+                                          value={String(c?.name ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.credentials]
+                                              next[idx] = { ...(next[idx] as any), name: v }
+                                              return { ...p, credentials: next }
+                                            })
+                                          }}
+                                          placeholder="Credential name"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(c?.issuer ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.credentials]
+                                              next[idx] = { ...(next[idx] as any), issuer: v }
+                                              return { ...p, credentials: next }
+                                            })
+                                          }}
+                                          placeholder="Issuer"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(c?.credentialId ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.credentials]
+                                              next[idx] = { ...(next[idx] as any), credentialId: v }
+                                              return { ...p, credentials: next }
+                                            })
+                                          }}
+                                          placeholder="Credential ID"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(c?.expiry ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.credentials]
+                                              next[idx] = { ...(next[idx] as any), expiry: v }
+                                              return { ...p, credentials: next }
+                                            })
+                                          }}
+                                          placeholder="Expiry"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                      </div>
+                                      <textarea
+                                        value={String(c?.notes ?? '')}
+                                        onChange={(ev) => {
+                                          const v = ev.target.value
+                                          setResumeParseModal((p) => {
+                                            const next = [...p.credentials]
+                                            next[idx] = { ...(next[idx] as any), notes: v }
+                                            return { ...p, credentials: next }
+                                          })
+                                        }}
+                                        placeholder="Notes"
+                                        rows={3}
+                                        className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : resumeParseModal.tab === 'referees' ? (
+                      <>
+                        {resumeParseModal.referees.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">No referees found.</div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between text-sm text-slate-300">
+                              <div>Select referees to import. You can edit each before importing.</div>
+                              <button
+                                type="button"
+                                className="text-xs underline text-blue-300"
+                                onClick={() => {
+                                  const all = new Set(resumeParseModal.referees.map((_: any, i: number) => i))
+                                  const none = new Set<number>()
+                                  const allSelected = resumeParseModal.selectedRefereeIndices.size === resumeParseModal.referees.length
+                                  setResumeParseModal((p) => ({ ...p, selectedRefereeIndices: allSelected ? none : all }))
+                                }}
+                              >
+                                {resumeParseModal.selectedRefereeIndices.size === resumeParseModal.referees.length ? 'Select none' : 'Select all'}
+                              </button>
+                            </div>
+                            <div className="space-y-3">
+                              {resumeParseModal.referees.map((r, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`border rounded-xl p-4 ${
+                                    resumeParseModal.selectedRefereeIndices.has(idx)
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1"
+                                      checked={resumeParseModal.selectedRefereeIndices.has(idx)}
+                                      onChange={(ev) => {
+                                        const next = new Set(resumeParseModal.selectedRefereeIndices)
+                                        if (ev.target.checked) next.add(idx)
+                                        else next.delete(idx)
+                                        setResumeParseModal((p) => ({ ...p, selectedRefereeIndices: next }))
+                                      }}
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="grid md:grid-cols-2 gap-2">
+                                        <input
+                                          value={String(r?.name ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), name: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Name"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(r?.relationship ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), relationship: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Relationship"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(r?.company ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), company: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Company"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(r?.title ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), title: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Title"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(r?.email ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), email: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Email"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String(r?.phone ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.referees]
+                                              next[idx] = { ...(next[idx] as any), phone: v }
+                                              return { ...p, referees: next }
+                                            })
+                                          }}
+                                          placeholder="Phone"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                      </div>
+                                      <textarea
+                                        value={String(r?.notes ?? '')}
+                                        onChange={(ev) => {
+                                          const v = ev.target.value
+                                          setResumeParseModal((p) => {
+                                            const next = [...p.referees]
+                                            next[idx] = { ...(next[idx] as any), notes: v }
+                                            return { ...p, referees: next }
+                                          })
+                                        }}
+                                        placeholder="Notes"
+                                        rows={3}
+                                        className="w-full px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : resumeParseModal.tab === 'social' ? (
+                      <>
+                        {resumeParseModal.socialLinks.length === 0 ? (
+                          <div className="text-center py-10 text-slate-400">No social links found.</div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between text-sm text-slate-300">
+                              <div>Select social links to import. You can edit platform + URL.</div>
+                              <button
+                                type="button"
+                                className="text-xs underline text-blue-300"
+                                onClick={() => {
+                                  const all = new Set(resumeParseModal.socialLinks.map((_: any, i: number) => i))
+                                  const none = new Set<number>()
+                                  const allSelected = resumeParseModal.selectedSocialIndices.size === resumeParseModal.socialLinks.length
+                                  setResumeParseModal((p) => ({ ...p, selectedSocialIndices: allSelected ? none : all }))
+                                }}
+                              >
+                                {resumeParseModal.selectedSocialIndices.size === resumeParseModal.socialLinks.length ? 'Select none' : 'Select all'}
+                              </button>
+                            </div>
+                            <div className="space-y-3">
+                              {resumeParseModal.socialLinks.map((s, idx) => (
+                                <div
+                                  key={idx}
+                                  className={`border rounded-xl p-4 ${
+                                    resumeParseModal.selectedSocialIndices.has(idx)
+                                      ? 'border-blue-500 bg-blue-500/10'
+                                      : 'border-slate-700 bg-slate-900/40'
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1"
+                                      checked={resumeParseModal.selectedSocialIndices.has(idx)}
+                                      onChange={(ev) => {
+                                        const next = new Set(resumeParseModal.selectedSocialIndices)
+                                        if (ev.target.checked) next.add(idx)
+                                        else next.delete(idx)
+                                        setResumeParseModal((p) => ({ ...p, selectedSocialIndices: next }))
+                                      }}
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="grid md:grid-cols-2 gap-2">
+                                        <input
+                                          value={String((s as any)?.platform ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.socialLinks]
+                                              next[idx] = { ...(next[idx] as any), platform: v }
+                                              return { ...p, socialLinks: next }
+                                            })
+                                          }}
+                                          placeholder="Platform (e.g., LinkedIn)"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                        <input
+                                          value={String((s as any)?.url ?? '')}
+                                          onChange={(ev) => {
+                                            const v = ev.target.value
+                                            setResumeParseModal((p) => {
+                                              const next = [...p.socialLinks]
+                                              next[idx] = { ...(next[idx] as any), url: v }
+                                              return { ...p, socialLinks: next }
+                                            })
+                                          }}
+                                          placeholder="https://…"
+                                          className="px-3 py-2 rounded bg-slate-900 border border-slate-700 text-white"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : resumeParseModal.tab !== 'experience' ? (
+                      <div className="text-sm text-slate-400">Select a tab to review extracted data.</div>
+                    ) : null}
+
+                    {resumeParseModal.tab === 'experience' ? (
+                    <div className="text-sm text-slate-300 mb-4">
+                      Select the job experiences you want to add to your portfolio. All are selected by default.
+                    </div>
+                    ) : null}
+                    {resumeParseModal.tab === 'experience'
+                      ? resumeParseModal.experiences.map((exp, index) => (
+                      <div
+                        key={index}
+                        className={`border rounded-xl p-4 ${
+                          resumeParseModal.selectedExperienceIndices.has(index)
+                            ? 'border-blue-500 bg-blue-500/10'
+                            : 'border-slate-700 bg-slate-900/40'
+                        }`}
+                      >
+                        <label className="flex items-start gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={resumeParseModal.selectedExperienceIndices.has(index)}
+                            onChange={(e) => {
+                              const newSelected = new Set(resumeParseModal.selectedExperienceIndices)
+                              if (e.target.checked) {
+                                newSelected.add(index)
+                              } else {
+                                newSelected.delete(index)
+                              }
+                              setResumeParseModal(prev => ({ ...prev, selectedExperienceIndices: newSelected }))
+                            }}
+                            className="mt-1"
+                          />
+                          <div className="flex-1">
+                            <div className="font-semibold text-lg mb-1">
+                              {exp.title || 'Position'} {exp.company ? `at ${exp.company}` : ''}
+                            </div>
+                            {(exp.start_date || exp.end_date) && (
+                              <div className="text-sm text-slate-400 mb-2">
+                                {exp.start_date || 'Start'} - {exp.end_date || 'Present'}
+                              </div>
+                            )}
+                            {exp.description && (
+                              <div className="text-sm text-slate-300 mb-2">{exp.description}</div>
+                            )}
+                            {exp.achievements && exp.achievements.length > 0 && (
+                              <div className="text-sm text-slate-400">
+                                <div className="font-medium mb-1">Achievements:</div>
+                                <ul className="list-disc list-inside space-y-1">
+                                  {exp.achievements.map((ach, i) => (
+                                    <li key={i}>{ach}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      </div>
+                    ))
+                      : null}
+                  </div>
+                )}
+              </div>
+              {!resumeParseModal.parsing &&
+                (resumeParseModal.experiences.length +
+                  resumeParseModal.skills.length +
+                  resumeParseModal.education.length +
+                  resumeParseModal.credentials.length +
+                  resumeParseModal.referees.length) >
+                  0 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-white/10">
+                  <div className="text-sm text-slate-400">
+                    {resumeParseModal.selectedExperienceIndices.size +
+                      resumeParseModal.selectedSkillIndices.size +
+                      resumeParseModal.selectedEducationIndices.size +
+                      resumeParseModal.selectedCredentialIndices.size +
+                      resumeParseModal.selectedRefereeIndices.size +
+                      resumeParseModal.selectedSocialIndices.size}{' '}
+                    selected
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-slate-800 border border-slate-700 text-sm"
+                      onClick={() => setResumeParseModal(prev => ({ ...prev, open: false }))}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-blue-600 text-sm disabled:opacity-60"
+                      disabled={
+                        resumeParseModal.selectedExperienceIndices.size +
+                          resumeParseModal.selectedSkillIndices.size +
+                          resumeParseModal.selectedEducationIndices.size +
+                          resumeParseModal.selectedCredentialIndices.size +
+                          resumeParseModal.selectedRefereeIndices.size +
+                          resumeParseModal.selectedSocialIndices.size ===
+                        0
+                      }
+                      onClick={addSelectedExperiencesToPortfolio}
+                    >
+                      Add Selected to Portfolio (
+                      {resumeParseModal.selectedExperienceIndices.size +
+                        resumeParseModal.selectedSkillIndices.size +
+                        resumeParseModal.selectedEducationIndices.size +
+                        resumeParseModal.selectedCredentialIndices.size +
+                        resumeParseModal.selectedRefereeIndices.size +
+                        resumeParseModal.selectedSocialIndices.size}
+                      )
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {socialParseModal.open && (
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setSocialParseModal((p) => ({ ...p, open: false }))}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="w-full max-w-4xl bg-slate-950 border border-white/10 rounded-2xl overflow-hidden max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <div className="font-semibold">
+                  {socialParseModal.parsing ? 'Parsing Social Profile…' : `Import from ${socialParseModal.platform}`}
+                </div>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+                  onClick={() => setSocialParseModal((p) => ({ ...p, open: false }))}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto flex-1">
+                {socialParseModal.parsing ? (
+                  <div className="text-center py-12">
+                    <div className="text-lg mb-2">Analyzing link…</div>
+                    <div className="text-sm text-slate-400">Fetching public profile data where available.</div>
+                  </div>
+                ) : socialParseModal.message ? (
+                  <div className="border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-xl p-4 text-sm">
+                    {socialParseModal.message}
+                  </div>
+                ) : socialParseModal.projects.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400">
+                    Nothing detected to import from this link (public data may be limited).
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between text-sm text-slate-300">
+                      <div>Select items to import into your Portfolio (Projects). Selected by default.</div>
+                      <button
+                        type="button"
+                        className="text-xs underline text-blue-300"
+                        onClick={() => {
+                          const all = new Set(socialParseModal.projects.map((_: any, i: number) => i))
+                          const none = new Set<number>()
+                          const allSelected = socialParseModal.selectedProjectIdx.size === socialParseModal.projects.length
+                          setSocialParseModal((p) => ({ ...p, selectedProjectIdx: allSelected ? none : all }))
+                        }}
+                      >
+                        {socialParseModal.selectedProjectIdx.size === socialParseModal.projects.length ? 'Select none' : 'Select all'}
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {socialParseModal.projects.map((pr, idx) => (
+                        <div
+                          key={idx}
+                          className={`border rounded-xl p-4 ${
+                            socialParseModal.selectedProjectIdx.has(idx)
+                              ? 'border-blue-500 bg-blue-500/10'
+                              : 'border-slate-700 bg-slate-900/40'
+                          }`}
+                        >
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={socialParseModal.selectedProjectIdx.has(idx)}
+                              onChange={(e) => {
+                                const next = new Set(socialParseModal.selectedProjectIdx)
+                                if (e.target.checked) next.add(idx)
+                                else next.delete(idx)
+                                setSocialParseModal((p) => ({ ...p, selectedProjectIdx: next }))
+                              }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold truncate">{pr.name}</div>
+                              {pr.description ? <div className="text-sm text-slate-300 mt-1">{pr.description}</div> : null}
+                              <div className="text-xs text-slate-400 mt-2 break-all">{pr.url}</div>
+                            </div>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!socialParseModal.parsing && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-white/10">
+                  <div className="text-sm text-slate-400">
+                    {socialParseModal.selectedProjectIdx.size} selected
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-slate-800 border border-slate-700 text-sm"
+                      onClick={() => setSocialParseModal((p) => ({ ...p, open: false }))}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded bg-blue-600 text-sm disabled:opacity-60"
+                      disabled={socialParseModal.selectedProjectIdx.size === 0 && !socialParseModal.message}
+                      onClick={importParsedSocial}
+                    >
+                      Import selected ({socialParseModal.selectedProjectIdx.size})
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1778,6 +3251,7 @@ export default function TalentBankPage() {
           {!isLoading && filtered.length === 0 && <p>No items</p>}
           {filtered.map(item => {
             const socialUrl = item.item_type === 'social' ? getSocialUrl(item) : ''
+            const isResume = isResumeFile(item.title)
             return (
               <div
                 key={item.id}
@@ -1789,6 +3263,7 @@ export default function TalentBankPage() {
                 <div className="text-xs text-slate-400">
                   {item.item_type}
                     {item.file_type ? ` • ${item.file_type}` : ''}
+                    {isResume && ' • Resume detected'}
                 </div>
                   {item.item_type === 'social' && !!socialUrl && (
                     <div className="mt-1 text-xs text-slate-300 break-all">
@@ -1817,6 +3292,33 @@ export default function TalentBankPage() {
                           Open
                         </button>
                       )}
+                      {item.item_type === 'social' && (
+                        <button
+                          className="px-2 py-1 text-xs font-medium bg-green-600 hover:bg-green-500 text-white rounded"
+                          onClick={() => {
+                            setAutoSelectAfterEditId(item.id)
+                            setEditEntry({
+                              item,
+                              draft: {
+                                platform: item.title || (item.metadata as any)?.platform || 'LinkedIn',
+                                url: socialUrl,
+                              },
+                            })
+                          }}
+                          title="Edit this social link and automatically include it in your portfolio"
+                        >
+                          ✏️ Edit & Select for Portfolio
+                        </button>
+                      )}
+                      {item.item_type === 'social' && (
+                        <button
+                          className="px-2 py-1 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-white rounded border border-white/10"
+                          onClick={() => parseSocialFromItem(item)}
+                          title="Parse public profile data (GitHub/YouTube/Website) and import selected info into your portfolio"
+                        >
+                          🔎 Parse & Import
+                        </button>
+                      )}
                       <button
                         className="text-blue-400 text-xs underline"
                         onClick={() => {
@@ -1828,6 +3330,7 @@ export default function TalentBankPage() {
                                 url: socialUrl,
                               },
                             })
+                            setAutoSelectAfterEditId(null)
                             return
                           }
                           setEditEntry({ item, draft: item.metadata ?? {} })
@@ -1845,13 +3348,25 @@ export default function TalentBankPage() {
                   )}
 
                 {item.file_path && (
-                    <div className="mt-2 flex items-center gap-3">
+                    <div className="mt-2 flex items-center gap-3 flex-wrap">
                       <button
                         className="text-blue-400 text-xs underline"
                         onClick={() => openFile(item.file_path!)}
                       >
                         Open
                       </button>
+                      {isResumeFile(item.title) && (
+                        <button
+                          className="px-2 py-1 text-xs font-medium bg-green-600 hover:bg-green-500 text-white rounded"
+                          onClick={() => {
+                            console.log('Parsing resume:', item.title, item.file_path)
+                            parseResumeFromItem(item)
+                          }}
+                          title="Parse resume and select job experiences for your portfolio"
+                        >
+                          ✏️ Edit & Select for Portfolio
+                        </button>
+                      )}
                       <button
                         className="text-red-400 text-xs underline"
                         onClick={() => deleteItem(item)}

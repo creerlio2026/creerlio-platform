@@ -94,13 +94,41 @@ body {
 
 
 
-input,
-textarea,
-select {
-  color: #000000 !important;
+/* Input text color should be opposite to background:
+   - Dark backgrounds (bg-slate-900, etc.) = white text
+   - Light backgrounds (bg-white, bg-gray-50, etc.) = black text
+   Components should set text color explicitly via className or inline styles */
+
+/* Ensure inputs with dark backgrounds have white text */
+input[class*="bg-slate-900"],
+input[class*="bg-slate-800"],
+input[class*="bg-slate-950"],
+textarea[class*="bg-slate-900"],
+textarea[class*="bg-slate-800"],
+textarea[class*="bg-slate-950"],
+select[class*="bg-slate-900"],
+select[class*="bg-slate-800"],
+select[class*="bg-slate-950"] {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
 }
 
-input::placeholder,
-textarea::placeholder {
-  color: #6b7280 !important;
+/* Ensure inputs with light backgrounds have black text */
+input[class*="bg-white"],
+input[class*="bg-gray-50"],
+input[class*="bg-gray-100"],
+input[class*="bg-slate-50"],
+input[class*="bg-zinc-50"],
+textarea[class*="bg-white"],
+textarea[class*="bg-gray-50"],
+textarea[class*="bg-gray-100"],
+textarea[class*="bg-slate-50"],
+textarea[class*="bg-zinc-50"],
+select[class*="bg-white"],
+select[class*="bg-gray-50"],
+select[class*="bg-gray-100"],
+select[class*="bg-slate-50"],
+select[class*="bg-zinc-50"] {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
 }

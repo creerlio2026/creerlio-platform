@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import axios from 'axios'
+import { supabase } from '@/lib/supabase'
 
 interface Job {
-  id: number
+  id: string
   title: string
   description: string | null
   location: string | null
@@ -19,7 +19,7 @@ interface Job {
   salary_currency: string | null
   required_skills: string[] | null
   created_at: string
-  business_profile_id: number
+  business_profile_id: string | number | null
 }
 
 export default function JobsPage() {
@@ -27,119 +27,155 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [appliedJobs, setAppliedJobs] = useState<Set<number>>(new Set())
-  const [applyingJobId, setApplyingJobId] = useState<number | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [jobsError, setJobsError] = useState<string | null>(null)
+  const [appliedJobs, setAppliedJobs] = useState<Set<string>>(new Set())
+  const [applyingJobId, setApplyingJobId] = useState<string | null>(null)
   const [filters, setFilters] = useState({
     keyword: '',
     location: ''
   })
 
   useEffect(() => {
-    // Check auth status
-    const token = localStorage.getItem('access_token')
-    const email = localStorage.getItem('user_email')
-    setIsAuthenticated(!!token && !!email)
-    setUserEmail(email)
-    
-    fetchJobs()
-    if (token && email) {
-      fetchMyApplications(email)
+    let cancelled = false
+    supabase.auth
+      .getSession()
+      .then((res: any) => {
+        const data = res?.data
+        const uid = data?.session?.user?.id ?? null
+        if (cancelled) return
+        setUserId(uid)
+        setIsAuthenticated(!!uid)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setUserId(null)
+        setIsAuthenticated(false)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [filters])
+  }, [])
 
   useEffect(() => {
     fetchJobs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters])
+
+  useEffect(() => {
+    if (!userId) {
+      setAppliedJobs(new Set())
+      return
+    }
+    fetchMyApplications(userId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
 
   const fetchJobs = async () => {
     setIsLoading(true)
+    setJobsError(null)
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const params: any = {}
-      
-      if (filters.keyword) {
-        params.keyword = filters.keyword
-      }
-      if (filters.location) {
-        params.location = filters.location
+      const keyword = (filters.keyword || '').trim()
+      const loc = (filters.location || '').trim()
+
+      let qb: any = supabase
+        .from('jobs')
+        .select(
+          'id,title,description,location,city,country,employment_type,remote_allowed,salary_min,salary_max,salary_currency,required_skills,created_at,business_profile_id,status'
+        )
+        .limit(200)
+
+      // Prefer published jobs if this column exists; if it doesn't, Supabase will return an error and we'll fall back.
+      qb = qb.eq('status', 'published')
+      if (keyword) qb = qb.or(`title.ilike.%${keyword}%,description.ilike.%${keyword}%`)
+      if (loc) qb = qb.or(`location.ilike.%${loc}%,city.ilike.%${loc}%,country.ilike.%${loc}%`)
+
+      let res: any = await qb
+      if (res.error) {
+        // Try again without status filter (schema may not have it)
+        qb = supabase
+          .from('jobs')
+          .select(
+            'id,title,description,location,city,country,employment_type,remote_allowed,salary_min,salary_max,salary_currency,required_skills,created_at,business_profile_id'
+          )
+          .limit(200)
+        if (keyword) qb = qb.or(`title.ilike.%${keyword}%,description.ilike.%${keyword}%`)
+        if (loc) qb = qb.or(`location.ilike.%${loc}%,city.ilike.%${loc}%,country.ilike.%${loc}%`)
+        res = await qb
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jobs/page.tsx:55',message:'Fetching jobs - before request',data:{url:`${apiUrl}/api/jobs/public`,params},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
-      const response = await axios.get(`${apiUrl}/api/jobs/public`, { params })
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jobs/page.tsx:68',message:'Fetching jobs - response received',data:{status:response.status,hasJobs:!!response.data?.jobs,jobCount:response.data?.jobs?.length || 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
-      if (response.data && Array.isArray(response.data.jobs)) {
-        setJobs(response.data.jobs)
+      if (res.error) {
+        setJobs([])
+        setJobsError('Jobs are not configured yet (missing jobs table or permissions).')
+        return
       }
+
+      const mapped: Job[] = (res.data || []).map((j: any) => ({
+        id: String(j?.id),
+        title: typeof j?.title === 'string' ? j.title : 'Job',
+        description: typeof j?.description === 'string' ? j.description : null,
+        location: typeof j?.location === 'string' ? j.location : null,
+        city: typeof j?.city === 'string' ? j.city : null,
+        country: typeof j?.country === 'string' ? j.country : null,
+        employment_type: typeof j?.employment_type === 'string' ? j.employment_type : null,
+        remote_allowed: !!j?.remote_allowed,
+        salary_min: typeof j?.salary_min === 'number' ? j.salary_min : null,
+        salary_max: typeof j?.salary_max === 'number' ? j.salary_max : null,
+        salary_currency: typeof j?.salary_currency === 'string' ? j.salary_currency : null,
+        required_skills: Array.isArray(j?.required_skills) ? j.required_skills : null,
+        created_at: typeof j?.created_at === 'string' ? j.created_at : new Date().toISOString(),
+        business_profile_id: (j?.business_profile_id as any) ?? null,
+      }))
+
+      setJobs(mapped)
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jobs/page.tsx:72',message:'Fetching jobs - error',data:{errorMessage:error.message,status:error.response?.status,statusText:error.response?.statusText,url:error.config?.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       console.error('Error fetching jobs:', error)
+      setJobs([])
+      setJobsError('Jobs could not be loaded.')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const fetchMyApplications = async (email: string) => {
+  const fetchMyApplications = async (uid: string) => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await axios.get(`${apiUrl}/api/applications/me`, {
-        params: { email },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`
+      // Try common table names
+      const tables = ['job_applications', 'applications']
+      for (const table of tables) {
+        const res: any = await supabase.from(table).select('job_id').eq('user_id', uid).limit(500)
+        if (!res.error) {
+          const ids = new Set<string>((res.data || []).map((r: any) => String(r?.job_id)).filter(Boolean))
+          setAppliedJobs(ids)
+          return
         }
-      })
-      if (response.data && Array.isArray(response.data.applications)) {
-        const appliedIds = new Set(response.data.applications.map((app: any) => app.job_id))
-        setAppliedJobs(appliedIds)
       }
-    } catch (error) {
-      console.error('Error fetching applications:', error)
+      setAppliedJobs(new Set())
+    } catch {
+      setAppliedJobs(new Set())
     }
   }
 
-  const handleApply = async (jobId: number) => {
-    if (!isAuthenticated || !userEmail) {
+  const handleApply = async (jobId: string) => {
+    if (!isAuthenticated || !userId) {
       router.push('/login?redirect=/jobs')
       return
     }
 
     setApplyingJobId(jobId)
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await axios.post(
-        `${apiUrl}/api/applications`,
-        { job_id: jobId },
-        {
-          params: { email: userEmail },
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`
-          }
+      const payload = { user_id: userId, job_id: jobId }
+      const tables = ['job_applications', 'applications']
+      for (const table of tables) {
+        const res: any = await supabase.from(table).insert(payload as any)
+        if (!res.error) {
+          setAppliedJobs((prev) => new Set([...Array.from(prev), jobId]))
+          return
         }
-      )
-
-      if (response.data.success) {
-        setAppliedJobs(prev => new Set([...prev, jobId]))
-        // Refresh applications list
-        fetchMyApplications(userEmail)
       }
+      alert('Job applications are not available yet (missing applications table or permissions).')
     } catch (error: any) {
       console.error('Error applying to job:', error)
-      const errorMessage = error.response?.data?.detail || 'Failed to apply. Please try again.'
-      alert(errorMessage)
-      
-      // If error is about profile, redirect to edit
-      if (errorMessage.includes('profile')) {
-        router.push('/dashboard/talent/edit')
-      }
+      alert('Failed to apply. Please try again.')
     } finally {
       setApplyingJobId(null)
     }
@@ -215,6 +251,12 @@ export default function JobsPage() {
             </div>
           </div>
         </div>
+
+        {jobsError && (
+          <div className="mb-6 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-lg p-4">
+            {jobsError}
+          </div>
+        )}
 
         {/* Jobs List */}
         {isLoading ? (

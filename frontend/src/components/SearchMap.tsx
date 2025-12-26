@@ -10,7 +10,7 @@ if (typeof window !== 'undefined') {
 }
 
 interface Marker {
-  id: number
+  id: string | number
   lat: number
   lng: number
   title: string
@@ -23,6 +23,7 @@ interface SearchMapProps {
   className?: string
   center?: { lat: number; lng: number }
   zoom?: number
+  isExpanded?: boolean
 }
 
 type MapStyle = 'dark' | 'light' | 'satellite' | 'streets'
@@ -34,7 +35,7 @@ const mapStyles: Record<MapStyle, string> = {
   streets: 'mapbox://styles/mapbox/streets-v12',
 }
 
-export default function SearchMap({ markers, className = '', center, zoom = 11 }: SearchMapProps) {
+export default function SearchMap({ markers, className = '', center, zoom = 11, isExpanded = false }: SearchMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markersRef = useRef<any[]>([])
@@ -161,14 +162,47 @@ export default function SearchMap({ markers, className = '', center, zoom = 11 }
     }
   }, [markers, center, zoom, activeStyle])
 
+  // Resize map when expanded state changes
+  useEffect(() => {
+    if (map.current && isExpanded) {
+      // Use requestAnimationFrame to ensure DOM has fully updated
+      const frameId = requestAnimationFrame(() => {
+        // Double RAF to ensure layout is complete
+        requestAnimationFrame(() => {
+          if (map.current) {
+            map.current.resize()
+          }
+        })
+      })
+      return () => cancelAnimationFrame(frameId)
+    }
+  }, [isExpanded])
+
+  // Also handle window resize events
+  useEffect(() => {
+    if (!map.current) return
+
+    const handleResize = () => {
+      if (map.current) {
+        map.current.resize()
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
   return (
-    <div className={`relative w-full h-full ${className}`}>
+    <div className={`relative w-full h-full ${className}`} onClick={(e) => e.stopPropagation()}>
       {/* Style Tabs */}
       <div className="absolute top-4 left-4 z-20 flex gap-2 bg-slate-900/90 backdrop-blur-sm rounded-lg p-1 border border-white/10">
         {(['dark', 'light', 'satellite', 'streets'] as MapStyle[]).map((style) => (
           <button
             key={style}
-            onClick={() => setActiveStyle(style)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setActiveStyle(style)
+            }}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
               activeStyle === style
                 ? 'bg-blue-500 text-white'
@@ -182,7 +216,7 @@ export default function SearchMap({ markers, className = '', center, zoom = 11 }
 
       {/* Legend */}
       {markers.length > 0 && (
-        <div className="absolute top-4 right-4 z-20 bg-slate-900/90 backdrop-blur-sm rounded-lg p-3 border border-white/10">
+        <div className="absolute top-4 right-4 z-20 bg-slate-900/90 backdrop-blur-sm rounded-lg p-3 border border-white/10" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col gap-2 text-sm">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
@@ -201,7 +235,7 @@ export default function SearchMap({ markers, className = '', center, zoom = 11 }
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
-      <div ref={mapContainer} className="w-full h-full rounded-lg" />
+      <div ref={mapContainer} className="w-full h-full rounded-lg" style={{ width: '100%', height: '100%' }} />
     </div>
   )
 }

@@ -10,11 +10,24 @@ MAPBOX_API_KEY=pk.eyJ1IjoiY3JlZXJsaW8iLCJhIjoiY21pY3IxZHljMXFwNTJzb2FydzR4b3F1YS
 ## 📋 Other API Keys (Optional)
 
 ### OpenAI API Key (for AI Resume Parsing)
-To enable AI-powered resume parsing, add to `.env`:
+To enable AI-powered resume parsing:
+
+- If you're using the **Python backend**, add to root `.env`
+- If you're using the **Next.js frontend-only** flow (Python disabled), add to `frontend/.env.local`
+
+Root `.env` (Python backend):
 ```
 OPENAI_API_KEY=sk-your-key-here
+OPENAI_MODEL=gpt-4o-mini
 ```
 Get your key at: https://platform.openai.com/api-keys
+
+Frontend `frontend/.env.local` (Next.js route handler `/api/resume/parse`):
+```
+OPENAI_API_KEY=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
+OPENAI_MODEL=gpt-4o-mini
+```
+Then restart the frontend (`npm run dev`) so Next.js picks up the env vars.
 
 ### Google Maps API Key (for Mapping Features)
 For advanced mapping features, add to `.env`:

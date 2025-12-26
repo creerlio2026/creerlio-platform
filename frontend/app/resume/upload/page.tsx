@@ -91,26 +91,15 @@ export default function ResumeUploadPage() {
 
       // Ensure public.users row exists (Talent Bank FK can require it)
       try {
-        const candidates: Array<Record<string, any>> = [
-          { id: userId, role: 'talent', email: null },
-          { id: userId, user_type: 'talent', email: null },
-          { id: userId, type: 'talent', email: null },
-          { id: userId, email: null },
-          { id: userId },
-          { user_id: userId, role: 'talent', email: null },
-          { user_id: userId, user_type: 'talent', email: null },
-          { user_id: userId, type: 'talent', email: null },
-          { user_id: userId, email: null },
-          { user_id: userId },
-        ]
-        for (const payload of candidates) {
-          const res = await supabase.from('users').upsert(payload as any)
-          if (!res.error) break
-          const msg = String((res.error as any)?.message ?? '')
-          const code = String((res.error as any)?.code ?? '')
+        // Keep this quiet: try only the two schemas supported by our migration helper (id vs user_id).
+        const r1 = await supabase.from('users').upsert({ id: userId } as any)
+        if (r1.error) {
+          const msg = String((r1.error as any)?.message ?? '')
+          const code = String((r1.error as any)?.code ?? '')
           const isMissingCol = code === 'PGRST204' || /Could not find the .* column/i.test(msg)
-          if (isMissingCol) continue
-          break
+          if (isMissingCol) {
+            await supabase.from('users').upsert({ user_id: userId } as any)
+          }
         }
       } catch {
         // ignore
@@ -247,6 +236,7 @@ export default function ResumeUploadPage() {
         startDate: e.startDate || '',
         endDate: e.endDate || '',
         description: e.description || '',
+        achievements: Array.isArray(e.achievements) ? e.achievements : [],
         source: 'resume',
       },
       is_public: false,

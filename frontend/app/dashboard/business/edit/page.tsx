@@ -369,21 +369,57 @@ export default function EditBusinessProfilePage() {
         return
       }
 
-      const filterCols = ['user_id', 'owner_id', 'business_user_id', 'business_id', 'id']
+      // CRITICAL: Check for talent profile to prevent cross-contamination
+      let talentCheck: { data: any; error: any } = { data: null, error: null }
+      try {
+        // Only select id to minimize schema dependencies
+        talentCheck = await supabase.from('talent_profiles').select('id').eq('user_id', uid).maybeSingle()
+        // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:talent_check',message:'Checking for talent profile to prevent crossover',data:{hasTalentProfile:!!talentCheck.data,talentId:talentCheck.data?.id,hasError:!!talentCheck.error,errorCode:talentCheck.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CROSS_CHECK'})}).catch(()=>{});
+        // #endregion
+      } catch (err) {
+        // Talent profile check failed - schema may not have user_id column, continue anyway
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:talent_check_error',message:'Talent profile check failed (schema issue)',data:{error:err},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CROSS_CHECK'})}).catch(()=>{});
+        // #endregion
+      }
+
+      // Load business profile - try user_id first (if column exists), otherwise try to find by id from users table
       let row: BusinessProfileRow | null = null
       let lastErr: any = null
-
-      for (const col of filterCols) {
-        // Avoid deep generic inference from Supabase types (varies across environments)
-        const res: any = await (supabase.from('business_profiles').select('*') as any).eq(col as any, uid).maybeSingle()
-        if (!res.error && res.data) {
-          row = res.data as any
+      
+      // First attempt: query by user_id (if column exists)
+      const res: any = await (supabase.from('business_profiles').select('*') as any).eq('user_id', uid).maybeSingle()
+      if (!res.error && res.data) {
+        row = res.data
       // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:found',message:'Business profile lookup succeeded',data:{filterCol:col,hasRow:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP2'})}).catch(()=>{});
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:found',message:'Business profile lookup succeeded (by user_id)',data:{hasRow:true,hasTalentProfile:!!talentCheck.data,businessId:row?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP2'})}).catch(()=>{});
       // #endregion
-          break
-        }
+      } else {
         lastErr = res.error
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:user_id_failed',message:'Business profile lookup by user_id failed - will try alternative method',data:{errorCode:res.error?.code,errorMessage:res.error?.message,errorDetails:res.error?.details,uid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP2'})}).catch(()=>{});
+        // #endregion
+        
+        // Alternative: If user_id column doesn't exist, we need to query through users table
+        // However, we can't easily join in Supabase client, so we'll need to handle this differently
+        // For now, if user_id query fails with column error, treat as no profile found
+        if (res.error?.code === '42703' || res.error?.message?.includes('column') || res.error?.code === 'PGRST204') {
+          // Column doesn't exist - user_id column is missing from business_profiles table
+          // This means we need to create the profile or the schema is outdated
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:user_id_missing',message:'user_id column does not exist in business_profiles - schema issue',data:{errorCode:res.error?.code,errorMessage:res.error?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP2'})}).catch(()=>{});
+          // #endregion
+          // Set row to null so form appears empty and user can create new profile
+          row = null
+        }
+      }
+
+      // VALIDATION: Warn if user has both profiles (indicates potential data corruption)
+      if (talentCheck.data && row) {
+        // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:fetchProfile:dual_profile_warning',message:'WARNING: User has both talent and business profiles in edit page',data:{talentId:talentCheck.data.id,businessId:row.id,businessName:pickBusinessName(row)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'DUAL_PROFILE'})}).catch(()=>{});
+        // #endregion
       }
 
       if (lastErr && !row) {
@@ -495,19 +531,47 @@ export default function EditBusinessProfilePage() {
       }
 
       const nameKeyCandidates = ['name', 'business_name', 'company_name', 'legal_name', 'display_name']
-      const ownerKeyCandidates = ['user_id', 'owner_id', 'business_user_id', 'business_id', 'id']
+      // Use user_id as the canonical column for linking profiles to users (per RLS policies)
+      const ownerKey = 'user_id'
 
       const tryUpdateByKnownRow = async (payload: Record<string, any>) => {
         const existingId = profile?.id ?? null
         if (existingId !== null && existingId !== undefined) {
-          return await (supabase.from('business_profiles') as any).update(payload).eq('id' as any, existingId)
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:update_by_id',message:'Attempting to update business profile by id',data:{existingId,payloadKeys:Object.keys(payload)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+          // #endregion
+          const res = await (supabase.from('business_profiles') as any).update(payload).eq('id' as any, existingId)
+          // #region agent log
+          if (res.error) {
+            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:update_by_id_error',message:'Update by id failed',data:{existingId,errorCode:res.error?.code,errorMessage:res.error?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+          }
+          // #endregion
+          return res
         }
-        // Fallback: update by user_id when id isn’t available (common in some schemas)
-        return await (supabase.from('business_profiles') as any).update(payload).eq('user_id' as any, uid)
+        // Fallback: update by user_id when id isn't available (if user_id column exists)
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:update_by_user_id',message:'Attempting to update business profile by user_id (fallback)',data:{uid,payloadKeys:Object.keys(payload)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+        // #endregion
+        const res = await (supabase.from('business_profiles') as any).update(payload).eq('user_id' as any, uid)
+        // #region agent log
+        if (res.error) {
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:update_by_user_id_error',message:'Update by user_id failed',data:{errorCode:res.error?.code,errorMessage:res.error?.message,uid,isColumnError:isInvalidColumnErr(res.error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+        }
+        // #endregion
+        // If user_id column doesn't exist, return error that will trigger INSERT path
+        if (res.error && isInvalidColumnErr(res.error)) {
+          // Return error to trigger INSERT fallback - user_id column doesn't exist
+          return res
+        }
+        return res
       }
 
       const isMissingColumnErr = (err: any) => {
-        return err?.code === 'PGRST204' || /Could not find the .* column/i.test(err?.message ?? '')
+        return err?.code === 'PGRST204' || err?.code === '42703' || /Could not find the .* column/i.test(err?.message ?? '') || /column.*does not exist/i.test(err?.message ?? '')
+      }
+      
+      const isInvalidColumnErr = (err: any) => {
+        return err?.code === '42703' || /column.*does not exist/i.test(err?.message ?? '')
       }
 
       // 1) Schema-tolerant update: set the name first (required), then attempt optional fields one-by-one.
@@ -567,32 +631,57 @@ export default function EditBusinessProfilePage() {
       // 2) If update not possible, try insert with owner + name fallbacks.
       if (!updatedOk) {
         lastErr = null
-        for (const ownerKey of ownerKeyCandidates) {
-          for (const nameKey of nameKeyCandidates) {
-            // Insert minimal fields only; optional fields can be added later via update attempts.
-            const payload: Record<string, any> = { [nameKey]: formData.name.trim(), [ownerKey]: uid }
-            const res = await supabase.from('business_profiles').insert(payload)
+        // Try INSERT - first with user_id, then without if column doesn't exist
+        for (const nameKey of nameKeyCandidates) {
+          // Try INSERT with user_id first
+          let payload: Record<string, any> = { [nameKey]: formData.name.trim() }
+          if (ownerKey && uid) {
+            payload[ownerKey] = uid
+          }
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_attempt',message:'Attempting business profile insert',data:{ownerKey,nameKey,hasUserId:!!payload[ownerKey]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+          // #endregion
+          let res = await supabase.from('business_profiles').insert(payload)
+          if (!res.error) {
+            updatedOk = true
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_ok',message:'Business profile insert succeeded',data:{ownerKey,nameKey,hasUserId:!!payload[ownerKey]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+            // #endregion
+            break
+          }
+          lastErr = res.error
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_error',message:'Business profile insert failed',data:{nameKey,errorCode:res.error?.code,errorMessage:res.error?.message,isColumnError:isInvalidColumnErr(res.error),hasUserId:!!payload[ownerKey]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+          // #endregion
+          // If error is due to missing user_id column, retry without it
+          if (isInvalidColumnErr(res.error) && payload[ownerKey]) {
+            delete payload[ownerKey]
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_retry_no_user_id',message:'Retrying insert without user_id column',data:{nameKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+            // #endregion
+            res = await supabase.from('business_profiles').insert(payload)
             if (!res.error) {
               updatedOk = true
               // #region agent log
-              fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_ok',message:'Business profile insert succeeded',data:{ownerKey,nameKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+              fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_ok_no_user_id',message:'Business profile insert succeeded (without user_id)',data:{nameKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
               // #endregion
               break
             }
             lastErr = res.error
-            if (!isMissingColumnErr(res.error)) {
-              // Not a schema-cache-missing-column issue; don't brute force further.
-              break
-            }
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_retry_error',message:'Insert retry without user_id also failed',data:{nameKey,errorCode:res.error?.code,errorMessage:res.error?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
+            // #endregion
           }
-          if (updatedOk) break
+          if (!isMissingColumnErr(res.error)) {
+            // Not a schema-cache-missing-column issue; don't brute force further.
+            break
+          }
         }
-
+        // #region agent log
         if (!updatedOk) {
-      // #region agent log
           fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/edit/page.tsx:save:insert_fail',message:'Business profile save failed (all payload variants)',data:{errCode:lastErr?.code,errMsg:lastErr?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BP4'})}).catch(()=>{});
-      // #endregion
         }
+        // #endregion
       }
 
       if (!updatedOk) {

@@ -57,21 +57,64 @@ export default function BusinessDashboard() {
           return
         }
 
-        // Load business profile for header/display (schema varies across envs)
-        const filterCols = ['user_id', 'owner_id', 'business_user_id', 'business_id', 'id']
+        // CRITICAL: Check if user has a talent profile first to prevent cross-contamination
+        // Only check if talent_profiles table exists and has user_id column (may not exist in all schemas)
+        let talentCheck: { data: any; error: any } = { data: null, error: null }
+        try {
+          // Only select id to minimize schema dependencies
+          talentCheck = await supabase.from('talent_profiles').select('id').eq('user_id', uid).maybeSingle()
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:talent_check',message:'Checking for talent profile to prevent crossover',data:{hasTalentProfile:!!talentCheck.data,talentId:talentCheck.data?.id,hasError:!!talentCheck.error,errorCode:talentCheck.error?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CROSS_CHECK'})}).catch(()=>{});
+          // #endregion
+        } catch (err) {
+          // Talent profile check failed - schema may not have user_id column, continue anyway
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:talent_check_error',message:'Talent profile check failed (schema issue)',data:{error:err},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CROSS_CHECK'})}).catch(()=>{});
+          // #endregion
+        }
+
+        // Load business profile using user_id (canonical column per RLS policies)
         let bp: BusinessProfileRow | null = null
         let bpLastErr: any = null
-        for (const col of filterCols) {
-          // Avoid deep generic inference from Supabase types (varies across environments)
-          const res: any = await (supabase as any).from('business_profiles').select('*').eq(col, uid).maybeSingle()
-          if (!res.error && res.data) {
-            bp = res.data as any
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:profile_found',message:'Business profile found for dashboard',data:{filterCol:col,hasName:!!pickBusinessName(bp)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BDP'})}).catch(()=>{});
-            // #endregion
-            break
-          }
-          bpLastErr = res.error
+        const bpRes: any = await (supabase as any).from('business_profiles').select('*').eq('user_id', uid).maybeSingle()
+        if (!bpRes.error && bpRes.data) {
+          bp = bpRes.data
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:profile_found',message:'Business profile found for dashboard',data:{hasName:!!pickBusinessName(bp),businessId:bp?.id,hasTalentProfile:!!talentCheck.data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BDP'})}).catch(()=>{});
+          // #endregion
+        } else {
+          bpLastErr = bpRes.error
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:profile_not_found',message:'Business profile not found',data:{errorCode:bpRes.error?.code,errorMessage:bpRes.error?.message,errorDetails:bpRes.error?.details},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BDP'})}).catch(()=>{});
+          // #endregion
+        }
+
+        // VALIDATION: Only redirect if user has talent profile AND no business profile
+        // For new business users (no profiles yet), check localStorage to determine intent
+        const hasTalentNoBusiness = !!(talentCheck.data && !bp)
+        const storedRole = typeof window !== 'undefined' ? localStorage.getItem('creerlio_active_role') : null
+        const storedUserType = typeof window !== 'undefined' ? localStorage.getItem('user_type') : null
+        const isBusinessIntent = storedRole === 'business' || storedUserType === 'business'
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:redirect_check',message:'Checking if redirect needed',data:{hasTalentProfile:!!talentCheck.data,hasBusinessProfile:!!bp,hasTalentNoBusiness,isBusinessIntent,storedRole,storedUserType,willRedirect:hasTalentNoBusiness && !isBusinessIntent && !cancelled},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'REDIRECT'})}).catch(()=>{});
+        // #endregion
+        
+        // Only redirect if user has talent profile, no business profile, AND they don't have business intent in localStorage
+        // This allows new business users (no profiles yet) to access business dashboard
+        if (hasTalentNoBusiness && !isBusinessIntent && !cancelled) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:redirect_talent',message:'Talent user accessing business dashboard - redirecting',data:{talentId:talentCheck.data?.id,hasBusinessProfile:false,storedRole,storedUserType},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'REDIRECT'})}).catch(()=>{});
+          // #endregion
+          router.replace('/dashboard/talent')
+          return
+        }
+
+        // VALIDATION: If user has both talent and business profiles, log warning but allow access if activeRole is business
+        if (talentCheck.data && bp) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'dashboard/business/page.tsx:load:dual_profile_warning',message:'WARNING: User has both talent and business profiles',data:{talentId:talentCheck.data.id,businessId:bp.id,businessName:pickBusinessName(bp)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'DUAL_PROFILE'})}).catch(()=>{});
+          // #endregion
         }
         if (!bp && bpLastErr) {
           // #region agent log
@@ -176,7 +219,7 @@ export default function BusinessDashboard() {
       }
     }
     load()
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt: string, sess: any) => {
       const uid = sess?.user?.id ?? null
       const email = sess?.user?.email ?? null
       setSessionUid(uid)
@@ -199,16 +242,9 @@ export default function BusinessDashboard() {
         setReqErr('Please sign in.')
         return
       }
-      // Load business profile id
-      const filterCols = ['user_id', 'owner_id', 'business_user_id', 'business_id', 'id']
-      let bp: any = null
-      for (const col of filterCols) {
-        const res: any = await (supabase as any).from('business_profiles').select('*').eq(col, uid).maybeSingle()
-        if (!res.error && res.data) {
-          bp = res.data
-          break
-        }
-      }
+      // Load business profile id using user_id (canonical column)
+      const bpRes: any = await (supabase as any).from('business_profiles').select('id').eq('user_id', uid).maybeSingle()
+      const bp = bpRes.error ? null : bpRes.data
       if (!bp?.id) {
         setReqErr('Business profile not found for this user.')
         return
@@ -281,16 +317,113 @@ export default function BusinessDashboard() {
           Edit Profile
         </Link>
         {sessionUid ? (
-          <button
-            type="button"
-            onClick={async () => {
-              await supabase.auth.signOut()
-              router.replace('/')
-            }}
-            className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            Logout
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={async () => {
+                await supabase.auth.signOut()
+                router.replace('/')
+              }}
+              className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              Logout
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const confirmed = window.confirm(
+                  'Are you sure you want to delete your Business account? This action cannot be undone. All your business profile data, jobs, and connections will be permanently deleted.'
+                )
+                
+                if (!confirmed) return
+
+                try {
+                  // Delete business profile pages first (if business profile exists)
+                  if (businessProfile?.id) {
+                    await supabase
+                      .from('business_profile_pages')
+                      .delete()
+                      .eq('business_id', businessProfile.id)
+                      .catch(() => {}) // Ignore errors if table doesn't exist
+                  }
+
+                  // Delete business profile
+                  const { error: profileError } = await supabase
+                    .from('business_profiles')
+                    .delete()
+                    .eq('user_id', sessionUid)
+
+                  if (profileError) {
+                    console.error('Error deleting business profile:', profileError)
+                    // Continue anyway - profile might not exist
+                  }
+
+                  // Delete auth account via backend API (requires admin privileges)
+                  // This MUST succeed - if it fails, the user can still log in
+                  const { data: sessionRes } = await supabase.auth.getSession()
+                  const accessToken = sessionRes.session?.access_token
+                  if (!accessToken) {
+                    alert('Failed to delete account: missing access token. Please sign in again.')
+                    return
+                  }
+                  
+                  let deleteResponse
+                  try {
+                    deleteResponse = await fetch('/api/auth/delete-account', {
+                      method: 'DELETE',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${accessToken}`,
+                      },
+                      body: JSON.stringify({ user_id: sessionUid }),
+                    })
+                  } catch (fetchError: any) {
+                    alert(`Failed to delete account: ${fetchError?.message || 'Failed to fetch'}. Please contact support.`)
+                    return
+                  }
+                  
+                  if (!deleteResponse.ok) {
+                    const errorData = await deleteResponse.json().catch(() => ({}))
+                    const errorMsg = errorData?.detail || errorData?.message || 'Unknown error'
+                    console.error('Error deleting auth account:', errorData)
+                    alert(`Failed to delete account: ${errorMsg}. The account may still exist. Please contact support.`)
+                    return // Don't continue - deletion failed
+                  }
+                  
+                  const deleteResult = await deleteResponse.json().catch(() => ({}))
+                  if (!deleteResult.success) {
+                    alert(`Account deletion may have failed: ${deleteResult.message || 'Unknown error'}. Please contact support.`)
+                    return
+                  }
+
+                  // Clear localStorage
+                  localStorage.removeItem('creerlio_active_role')
+                  localStorage.removeItem('user_type')
+                  localStorage.removeItem('access_token')
+                  localStorage.removeItem('user_email')
+
+                  // Sign out
+                  try {
+                    await supabase.auth.signOut()
+                  } catch (signOutError) {
+                    // Ignore signOut errors - account is being deleted
+                    console.log('Sign out attempted')
+                  }
+
+                  // Redirect to home
+                  router.replace('/')
+                  
+                  alert('Your Business account has been deleted successfully.')
+                } catch (error: any) {
+                  console.error('Error deleting registration:', error)
+                  alert(`Failed to delete account: ${error?.message || 'Unknown error'}. Please contact support.`)
+                }
+              }}
+              className="px-4 py-2 border border-red-600 text-red-300 rounded-lg hover:bg-red-900/20 transition-colors"
+            >
+              Delete Registration
+            </button>
+          </>
         ) : (
           <button
             type="button"
@@ -302,7 +435,7 @@ export default function BusinessDashboard() {
         )}
       </div>
     )
-  }, [router, sessionUid, sessionEmail])
+  }, [router, sessionUid, sessionEmail, businessProfile])
 
   // Show loading while redirecting
   return (
