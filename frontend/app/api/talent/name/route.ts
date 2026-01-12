@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * API Route: Get Talent Name
  * Server-side route to fetch talent name for businesses viewing connections

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * API Route: List Credentials (Admin/User)
  * Returns credentials for authenticated user or admin view

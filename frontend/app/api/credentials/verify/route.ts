@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 /**
  * API Route: Verify Credential
  * Handles credential verification including hash comparison and blockchain verification
