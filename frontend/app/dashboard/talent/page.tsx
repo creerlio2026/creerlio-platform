@@ -4,6 +4,7 @@ import { useRef, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import VideoChat from '@/components/VideoChat'
 
 interface User {
   id: string
@@ -14,7 +15,18 @@ interface User {
   is_active: boolean
 }
 
-type TabType = 'overview' | 'profile' | 'portfolio' | 'applications' | 'messages' | 'connections'
+type TabType = 'overview' | 'profile' | 'portfolio' | 'applications' | 'connections'
+
+const SECTION_CHOICES = [
+  { key: 'intro', label: 'Introduction' },
+  { key: 'bio', label: 'Bio' },
+  { key: 'skills', label: 'Skills' },
+  { key: 'experience', label: 'Experience' },
+  { key: 'education', label: 'Education' },
+  { key: 'projects', label: 'Projects' },
+  { key: 'attachments', label: 'Attachments' },
+  { key: 'location_preferences', label: 'Location & commute preferences' },
+] as const
 
 export default function TalentDashboard() {
   const router = useRouter()
@@ -30,6 +42,9 @@ export default function TalentDashboard() {
   const [connError, setConnError] = useState<string | null>(null)
   const [connRequests, setConnRequests] = useState<any[]>([])
   const [connAccepted, setConnAccepted] = useState<any[]>([])
+  const [connDeclined, setConnDeclined] = useState<any[]>([])
+  const [selectedRequest, setSelectedRequest] = useState<any | null>(null)
+  const [isCancelling, setIsCancelling] = useState(false)
 
   // Export/Print consent requests (Business → Talent)
   const [consentLoading, setConsentLoading] = useState(false)
@@ -37,6 +52,10 @@ export default function TalentDashboard() {
   const [consentReqs, setConsentReqs] = useState<any[]>([])
   const [consentBusyId, setConsentBusyId] = useState<string | null>(null)
   const didAutoLoadConsentRef = useRef(false)
+  
+  // Saved Templates state
+  const [savedTemplates, setSavedTemplates] = useState<any[]>([])
+  const [savedTemplatesLoading, setSavedTemplatesLoading] = useState(false)
 
   useEffect(() => {
     // Set active role context for mixed-profile accounts
@@ -67,6 +86,11 @@ export default function TalentDashboard() {
   >([])
   const [msgBody, setMsgBody] = useState('')
   const didAutoLoadMessagesRef = useRef(false)
+  
+  // Video Chat state
+  const [videoChatSession, setVideoChatSession] = useState<any | null>(null)
+  const [videoChatLoading, setVideoChatLoading] = useState(false)
+  const [videoChatError, setVideoChatError] = useState<string | null>(null)
 
   // Portfolio view state
   const [portfolioLoading, setPortfolioLoading] = useState(false)
@@ -191,7 +215,7 @@ export default function TalentDashboard() {
         .from('talent_connection_requests')
         .select('id, business_id, status, selected_sections, created_at, responded_at')
         .eq('talent_id', talentId)
-          .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false })
 
       if (reqRes.error) {
         // Debug logging disabled
@@ -206,10 +230,98 @@ export default function TalentDashboard() {
       }
 
       const reqs = (reqRes.data || []) as any[]
-      setConnRequests(reqs.filter((r) => r.status === 'pending'))
-      setConnAccepted(reqs.filter((r) => r.status === 'accepted'))
+      // Incoming requests from businesses (status = 'pending' or 'waiting_for_review')
+      // These are requests that businesses sent TO this talent
+      const pendingReqs = reqs.filter((r) => r.status === 'pending' || r.status === 'waiting_for_review')
+      // Sort: 'waiting_for_review' first, then 'pending', both by created_at desc
+      pendingReqs.sort((a, b) => {
+        if (a.status === 'waiting_for_review' && b.status !== 'waiting_for_review') return -1
+        if (a.status !== 'waiting_for_review' && b.status === 'waiting_for_review') return 1
+        const aDate = new Date(a.created_at).getTime()
+        const bDate = new Date(b.created_at).getTime()
+        return bDate - aDate
+      })
+      // Accepted connections - these are requests that were accepted by this talent
+      // Filter out discontinued connections - only show active accepted connections
+      const acceptedReqs = reqs.filter((r) => r.status === 'accepted')
+      
+      // Declined/rejected requests - filter for rejected/declined status
+      const declinedReqs = reqs.filter((r) => r.status === 'rejected' || r.status === 'declined')
+      // Filter out requests that are older than 30 days (they should be deleted)
+      const now = new Date()
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+      const activeDeclinedReqs = declinedReqs.filter((r) => {
+        const respondedAt = r.responded_at ? new Date(r.responded_at) : null
+        const createdAt = r.created_at ? new Date(r.created_at) : null
+        // Use responded_at if available, otherwise use created_at
+        const dateToCheck = respondedAt || createdAt
+        return dateToCheck && dateToCheck >= thirtyDaysAgo
+      })
+      // Sort declined requests by responded_at desc (most recent first)
+      activeDeclinedReqs.sort((a, b) => {
+        const aDate = new Date(a.responded_at || a.created_at).getTime()
+        const bDate = new Date(b.responded_at || b.created_at).getTime()
+        return bDate - aDate
+      })
+      
+      // Fetch business names for all requests
+      const businessIds = Array.from(new Set([...pendingReqs, ...acceptedReqs, ...activeDeclinedReqs].map((r) => r.business_id).filter(Boolean)))
+      let businessNameMap: Record<string, string> = {}
+      if (businessIds.length > 0) {
+        const nameSelectors = ['id, business_name', 'id, name', 'id, company_name', 'id, display_name']
+        for (const sel of nameSelectors) {
+          const res = await supabase.from('business_profiles').select(sel).in('id', businessIds)
+          if (!res.error && res.data) {
+            for (const bp of res.data as any[]) {
+              const name = bp.business_name || bp.name || bp.company_name || bp.display_name || 'Business'
+              businessNameMap[String(bp.id)] = name
+            }
+            break
+          }
+        }
+      }
+      
+      // Add business names to requests
+      const pendingWithNames = pendingReqs.map((r) => ({ ...r, business_name: businessNameMap[String(r.business_id)] || 'Business' }))
+      const acceptedWithNames = acceptedReqs.map((r) => ({ ...r, business_name: businessNameMap[String(r.business_id)] || 'Business' }))
+      const declinedWithNames = activeDeclinedReqs.map((r) => ({ ...r, business_name: businessNameMap[String(r.business_id)] || 'Business' }))
+      
+      setConnRequests(pendingWithNames)
+      setConnAccepted(acceptedWithNames)
+      setConnDeclined(declinedWithNames)
     } finally {
       setConnLoading(false)
+    }
+  }
+
+  async function cancelConnectionRequest(requestId: string) {
+    if (!confirm('Are you sure you want to cancel this connection request? This action cannot be undone.')) {
+      return
+    }
+    
+    setIsCancelling(true)
+    setConnError(null)
+    try {
+      const { error } = await supabase
+        .from('talent_connection_requests')
+        .delete()
+        .eq('id', requestId)
+      
+      if (error) {
+        setConnError(error.message)
+        return
+      }
+      
+      // Remove from local state
+      setConnRequests((prev) => prev.filter((r) => r.id !== requestId))
+      setSelectedRequest(null)
+      
+      // Reload to ensure consistency
+      await loadConnections()
+    } catch (err: any) {
+      setConnError(err?.message || 'Failed to cancel connection request.')
+    } finally {
+      setIsCancelling(false)
     }
   }
 
@@ -374,79 +486,66 @@ export default function TalentDashboard() {
     }
   }
 
-  useEffect(() => {
-    if (activeTab !== 'messages') return
-    if (didAutoLoadMessagesRef.current) return
-    didAutoLoadMessagesRef.current = true
-    // Debug logging disabled
-    loadMessaging()
-  }, [activeTab])
+  // Messaging is now integrated into Connections tab - no separate useEffect needed
+
+  async function loadSavedTemplates() {
+    setSavedTemplatesLoading(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) {
+        setSavedTemplates([])
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('saved_templates')
+        .select('id, template_id, name, template_state, created_at, updated_at')
+        .eq('user_id', session.user.id)
+        .order('updated_at', { ascending: false })
+
+      if (error) throw error
+      setSavedTemplates(data || [])
+    } catch (error: any) {
+      console.error('Error loading saved templates:', error)
+      setSavedTemplates([])
+    } finally {
+      setSavedTemplatesLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (activeTab !== 'connections') return
-    if (didAutoLoadConsentRef.current) return
-    didAutoLoadConsentRef.current = true
-    loadConsentRequests().catch(() => {})
+    // Auto-load connections when connections tab becomes active
+    // Always reload to ensure data is fresh when switching to this tab
+    loadConnections().catch(() => {})
+    // Auto-load consent requests (only once per session)
+    if (!didAutoLoadConsentRef.current) {
+      didAutoLoadConsentRef.current = true
+      loadConsentRequests().catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  // Load portfolio data when portfolio tab is active
   useEffect(() => {
-    if (activeTab !== 'portfolio') return
-    if (!user?.id) return
-
-    let cancelled = false
-    const userId = user.id
-    async function loadPortfolio() {
-      setPortfolioLoading(true)
-      try {
-        const { data, error } = await supabase
-          .from('talent_bank_items')
-          .select('id, metadata, created_at')
-          .eq('user_id', userId)
-          .eq('item_type', 'portfolio')
-          .order('created_at', { ascending: false })
-          .limit(1)
-
-        if (error) {
-            console.error('Error loading portfolio:', error)
-            if (!cancelled) setPortfolioMeta(null)
-            return
-          }
-
-        const saved = (data?.[0]?.metadata ?? null) as any
-        if (!cancelled) {
-          setPortfolioMeta(saved || null)
-        }
-
-        if (saved && typeof saved === 'object') {
-          const [b, a] = await Promise.all([
-            saved.banner_path ? (async () => {
-              const { data: bannerData } = await supabase.storage.from('talent-bank').createSignedUrl(saved.banner_path, 60 * 30)
-              return bannerData?.signedUrl ?? null
-            })() : Promise.resolve(null),
-            saved.avatar_path ? (async () => {
-              const { data: avatarData } = await supabase.storage.from('talent-bank').createSignedUrl(saved.avatar_path, 60 * 30)
-              return avatarData?.signedUrl ?? null
-            })() : Promise.resolve(null),
-          ])
-          if (!cancelled) {
-            setPortfolioBannerUrl(b)
-            setPortfolioAvatarUrl(a)
-          }
-        }
-      } catch (err) {
-        console.error('Error loading portfolio:', err)
-        if (!cancelled) setPortfolioMeta(null)
-      } finally {
-        if (!cancelled) setPortfolioLoading(false)
-      }
+    if (activeTab === 'overview') {
+      loadSavedTemplates()
     }
-    loadPortfolio()
-    return () => {
-      cancelled = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab === 'overview') {
+      loadSavedTemplates()
     }
-  }, [activeTab, user?.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
+  // Redirect to /portfolio/view when portfolio tab is active (same as purple View Portfolio button)
+  useEffect(() => {
+    if (activeTab === 'portfolio') {
+      router.push('/portfolio/view')
+    }
+  }, [activeTab, router])
 
   // Legacy backend (axios) auth + profile fetch removed. Supabase session is now the source of truth.
 
@@ -486,15 +585,12 @@ export default function TalentDashboard() {
 
       const talentId = talentRes.data.id as string
 
-      // Only show connected businesses: active grants (not expired, not revoked)
+      // Only show connected businesses: accepted connection requests
       const grantsRes = await supabase
-        .from('talent_access_grants')
-        .select('business_id, expires_at, revoked_at')
+        .from('talent_connection_requests')
+        .select('business_id, status, responded_at')
         .eq('talent_id', talentId)
-        .is('revoked_at', null)
-        .gt('expires_at', new Date().toISOString())
-
-      // Debug logging disabled
+        .eq('status', 'accepted')
 
       if (grantsRes.error) {
         setMsgError('Could not load connections for messaging (permissions or schema issue).')
@@ -502,6 +598,8 @@ export default function TalentDashboard() {
       }
 
       const businessIds = Array.from(new Set((grantsRes.data || []).map((g: any) => g.business_id).filter(Boolean)))
+      console.log('[Talent Messages] Business IDs from connections:', businessIds)
+      
       if (businessIds.length === 0) {
         setMsgBusinesses([])
         setMsgSelectedBusinessId(null)
@@ -510,37 +608,109 @@ export default function TalentDashboard() {
         return
       }
 
+      // Convert all IDs to strings for consistent matching
+      const businessIdStrings = businessIds.map(id => String(id))
+
       // business_profiles "name" column varies across environments; attempt fallbacks without leaking data.
-      const nameSelectors = ['id, name', 'id, business_name', 'id, company_name', 'id, display_name', 'id, legal_name']
+      // Try to get all possible name fields in one query (mirroring the working business dashboard approach)
+      const nameSelectors = ['id, name, business_name, company_name, display_name, legal_name']
       let bizRows: Array<{ id: string; name: string | null }> | null = null
       let lastBizErr: any = null
 
       for (const sel of nameSelectors) {
-        const attempt = await supabase.from('business_profiles').select(sel).in('id', businessIds)
-        if (!attempt.error) {
+        const attempt = await supabase.from('business_profiles').select(sel).in('id', businessIdStrings)
+        console.log('[Talent Messages] Business query attempt:', {
+          selector: sel,
+          error: attempt.error,
+          dataCount: attempt.data?.length,
+          data: attempt.data
+        })
+        
+        if (!attempt.error && attempt.data && attempt.data.length > 0) {
           const mapped = (attempt.data || []).map((r: any) => {
             const n =
-              (typeof r.name === 'string' && r.name) ||
-              (typeof r.business_name === 'string' && r.business_name) ||
-              (typeof r.company_name === 'string' && r.company_name) ||
-              (typeof r.display_name === 'string' && r.display_name) ||
-              (typeof r.legal_name === 'string' && r.legal_name) ||
+              (typeof r.business_name === 'string' && r.business_name.trim()) ||
+              (typeof r.name === 'string' && r.name.trim()) ||
+              (typeof r.company_name === 'string' && r.company_name.trim()) ||
+              (typeof r.display_name === 'string' && r.display_name.trim()) ||
+              (typeof r.legal_name === 'string' && r.legal_name.trim()) ||
               null
-            return { id: r.id, name: n }
+            console.log('[Talent Messages] Mapped business:', { id: String(r.id), name: n, raw: r })
+            return { id: String(r.id), name: n || 'Business' }
           })
           bizRows = mapped
-          // Debug logging disabled
           break
         }
         lastBizErr = attempt.error
       }
-
-      if (!bizRows) {
-        // Debug logging disabled
-        setMsgError('Could not load business names (schema/RLS issue).')
-        return
+      
+      // Fallback: if the above query fails, try individual queries (mirroring business dashboard)
+      if (!bizRows || bizRows.length === 0) {
+        console.log('[Talent Messages] Trying fallback queries...')
+        const fallbackSelectors = ['id, name', 'id, business_name', 'id, company_name', 'id, display_name', 'id, legal_name']
+        for (const sel of fallbackSelectors) {
+          const attempt = await supabase.from('business_profiles').select(sel).in('id', businessIdStrings)
+          console.log('[Talent Messages] Fallback query:', { selector: sel, error: attempt.error, dataCount: attempt.data?.length })
+          if (!attempt.error && attempt.data && attempt.data.length > 0) {
+            const mapped = (attempt.data || []).map((r: any) => {
+              const n =
+                (typeof r.name === 'string' && r.name.trim()) ||
+                (typeof r.business_name === 'string' && r.business_name.trim()) ||
+                (typeof r.company_name === 'string' && r.company_name.trim()) ||
+                (typeof r.display_name === 'string' && r.display_name.trim()) ||
+                (typeof r.legal_name === 'string' && r.legal_name.trim()) ||
+                null
+              return { id: String(r.id), name: n || 'Business' }
+            })
+            bizRows = mapped
+            console.log('[Talent Messages] Fallback query succeeded:', bizRows)
+            break
+          }
+          lastBizErr = attempt.error
+        }
       }
 
+      // If still no results, try querying each business individually
+      if (!bizRows || bizRows.length === 0) {
+        console.log('[Talent Messages] Trying individual queries for each business...')
+        bizRows = []
+        for (const id of businessIdStrings) {
+          const individualQuery = await supabase
+            .from('business_profiles')
+            .select('id, business_name, name, company_name, display_name, legal_name')
+            .eq('id', id)
+            .maybeSingle()
+          
+          console.log('[Talent Messages] Individual query for', id, ':', {
+            error: individualQuery.error,
+            data: individualQuery.data
+          })
+          
+          if (individualQuery.data) {
+            const b = individualQuery.data
+            const n =
+              (b.business_name && String(b.business_name).trim()) ||
+              (b.name && String(b.name).trim()) ||
+              (b.company_name && String(b.company_name).trim()) ||
+              (b.display_name && String(b.display_name).trim()) ||
+              (b.legal_name && String(b.legal_name).trim()) ||
+              'Business'
+            bizRows.push({ id: String(id), name: n })
+          } else {
+            bizRows.push({ id: String(id), name: 'Business' })
+          }
+        }
+      }
+
+      // Ensure all business IDs have entries
+      const foundIds = new Set(bizRows.map(b => b.id))
+      businessIdStrings.forEach((id) => {
+        if (!foundIds.has(id)) {
+          bizRows!.push({ id: id, name: 'Business' })
+        }
+      })
+
+      console.log('[Talent Messages] Final business rows:', bizRows)
       setMsgBusinesses(bizRows)
     } finally {
       setMsgLoading(false)
@@ -565,22 +735,21 @@ export default function TalentDashboard() {
       }
       const talentId = talentRes.data.id as string
 
-      // Permission gate: active grant must exist to show or send messages
+      // Permission gate: accepted connection request must exist to show or send messages
       const gateRes = await supabase
-        .from('talent_access_grants')
-        .select('id, expires_at, revoked_at')
+        .from('talent_connection_requests')
+        .select('id, status, responded_at')
         .eq('talent_id', talentId)
         .eq('business_id', businessId)
-        .order('created_at', { ascending: false })
+        .eq('status', 'accepted')
+        .order('responded_at', { ascending: false })
         .limit(1)
 
       const gate = (gateRes.data || [])[0]
-      const isRevoked = !!gate?.revoked_at
-      const isExpired = gate?.expires_at ? new Date(gate.expires_at).getTime() <= Date.now() : true
-      if (!gate || isRevoked || isExpired) {
+      if (!gate || gate.status !== 'accepted') {
         setMsgConversationId(null)
         setMsgItems([])
-        setMsgError(isRevoked ? 'Access revoked' : 'Connection expired')
+        setMsgError('Connection not accepted. Please accept the connection request first.')
         return
       }
 
@@ -650,18 +819,17 @@ export default function TalentDashboard() {
 
       // Debug logging disabled
 
-      // Permission gate (again, before write)
+      // Permission gate (again, before write) - check for accepted connection
       const gateRes = await supabase
-        .from('talent_access_grants')
-        .select('id, expires_at, revoked_at')
+        .from('talent_connection_requests')
+        .select('id, status')
         .eq('talent_id', talentId)
         .eq('business_id', businessId)
-        .is('revoked_at', null)
-        .gt('expires_at', new Date().toISOString())
+        .eq('status', 'accepted')
         .limit(1)
 
       if ((gateRes.data || []).length === 0) {
-        setMsgError('Connection expired')
+        setMsgError('Connection not accepted. Please accept the connection request first.')
         return
       }
 
@@ -877,7 +1045,7 @@ export default function TalentDashboard() {
         {/* Tabs */}
         <div className="mb-8 border-b border-gray-800">
           <div className="flex items-center gap-2">
-            {(['overview', 'profile', 'portfolio', 'applications', 'messages', 'connections'] as TabType[]).map((tab) => (
+            {(['overview', 'portfolio', 'applications', 'connections'] as TabType[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -906,10 +1074,10 @@ export default function TalentDashboard() {
               Talent Map ↗
             </Link>
             <Link
-              href="/search"
+              href="/portfolio/templates"
               className="px-6 py-3 text-sm font-medium text-gray-300 hover:text-blue-400 transition-colors"
             >
-              Search ↗
+              Portfolio Templates ↗
             </Link>
           </div>
         </div>
@@ -991,7 +1159,7 @@ export default function TalentDashboard() {
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 bg-gray-700 rounded-full h-2">
-                          <div 
+                          <div
                             className="bg-blue-500 h-2 rounded-full transition-all"
                             style={{ width: `${calculateProfileCompletion()}%` }}
                             title={`Profile is ${calculateProfileCompletion()}% complete`}
@@ -1003,6 +1171,21 @@ export default function TalentDashboard() {
                           Complete your profile to improve your job matches
                         </p>
                       )}
+                      <div className="flex gap-3 mt-4">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('profile')}
+                          className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                        >
+                          Edit Profile
+                        </button>
+                        <Link
+                          href={`/talent/${user.id}`}
+                          className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors text-center"
+                        >
+                          View Profile
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1042,6 +1225,90 @@ export default function TalentDashboard() {
                 </Link>
               </div>
             )}
+
+            {/* Saved Templates Section */}
+            <div className="dashboard-card rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-white">Saved Templates</h2>
+                <Link
+                  href="/portfolio/templates"
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                >
+                  Browse Templates
+                </Link>
+              </div>
+              {savedTemplatesLoading ? (
+                <p className="text-gray-400">Loading saved templates...</p>
+              ) : savedTemplates.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-400 mb-4">No saved template configurations yet.</p>
+                  <p className="text-gray-500 text-sm mb-4">
+                    Edit a template and save it with a name to access it quickly here.
+                  </p>
+                  <Link
+                    href="/portfolio/templates"
+                    className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  >
+                    Go to Templates
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {savedTemplates.map((template) => (
+                    <div
+                      key={template.id}
+                      className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/30 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <h3 className="text-white font-semibold">{template.name}</h3>
+                          <p className="text-gray-400 text-sm mt-1">
+                            Template: {template.template_id}
+                          </p>
+                          <p className="text-gray-500 text-xs mt-1">
+                            Updated: {new Date(template.updated_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/portfolio/template/${template.template_id}?load=${template.id}`}
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
+                          >
+                            Load
+                          </Link>
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Delete "${template.name}"? This action cannot be undone.`)) {
+                                return
+                              }
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession()
+                                if (!session?.user?.id) return
+                                
+                                const { error } = await supabase
+                                  .from('saved_templates')
+                                  .delete()
+                                  .eq('id', template.id)
+                                  .eq('user_id', session.user.id)
+                                
+                                if (error) throw error
+                                await loadSavedTemplates()
+                              } catch (err: any) {
+                                console.error('Error deleting saved template:', err)
+                                alert(err.message || 'Failed to delete saved template')
+                              }
+                            }}
+                            className="px-4 py-2 bg-red-500/20 border border-red-500/40 text-red-200 rounded-lg hover:bg-red-500/30 transition-colors text-sm"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -1085,166 +1352,12 @@ export default function TalentDashboard() {
 
         {activeTab === 'portfolio' && (
           <div className="space-y-6">
-            {/* Header with Edit button */}
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-white">Portfolio</h2>
-              <Link
-                href="/portfolio"
-                className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-semibold transition-colors"
-              >
-                Edit
-              </Link>
+            <div className="dashboard-card rounded-xl p-12 flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-400">Redirecting to portfolio view...</p>
+              </div>
             </div>
-
-            {portfolioLoading ? (
-              <div className="dashboard-card rounded-xl p-12 flex items-center justify-center">
-                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : !portfolioMeta ? (
-              <div className="dashboard-card rounded-xl p-8 text-center">
-                <h3 className="text-xl font-bold text-white mb-2">No portfolio saved yet</h3>
-                <p className="text-gray-400 mb-6">
-                  Create your portfolio first, then come back here to review exactly what it looks like.
-                </p>
-                <Link
-                  href="/portfolio"
-                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-semibold"
-                >
-                  Build your portfolio
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Portfolio Header Section */}
-                <div className="dashboard-card rounded-xl overflow-hidden border border-gray-800">
-                  <div className="h-40 md:h-56 bg-slate-900 relative">
-                    {portfolioBannerUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={portfolioBannerUrl} alt="Banner" className="w-full h-full object-cover opacity-80" />
-                    ) : (
-                      <div className="w-full h-full bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(16,185,129,0.25),transparent_45%)]" />
-                    )}
-                  </div>
-                  <div className="p-6 md:p-8 flex items-start gap-5">
-                    <div className="shrink-0">
-                      {portfolioAvatarUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={portfolioAvatarUrl} alt="Avatar" className="w-20 h-20 rounded-2xl object-cover border border-white/10" />
-                      ) : (
-                        <div className="w-20 h-20 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center font-bold text-xl text-white">
-                          {((typeof portfolioMeta?.name === 'string' && portfolioMeta.name) || 'Talent').slice(0, 1).toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-3xl font-bold truncate text-white">
-                        {(typeof portfolioMeta?.name === 'string' && portfolioMeta.name) || 'Talent'}
-                      </h3>
-                      <p className="text-gray-300 mt-1">
-                        {(typeof portfolioMeta?.title === 'string' && portfolioMeta.title) || 'Your Title'}
-                      </p>
-                      {portfolioMeta?.bio && typeof portfolioMeta.bio === 'string' && (
-                        <p className="text-gray-300 mt-4 leading-relaxed whitespace-pre-wrap">
-                          {portfolioMeta.bio}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Skills Section */}
-                {Array.isArray(portfolioMeta?.skills) && portfolioMeta.skills.length > 0 && (
-                  <div className="dashboard-card rounded-xl p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Skills</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {portfolioMeta.skills.map((skill: string, idx: number) => (
-                        <span
-                          key={idx}
-                          className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-200 text-sm"
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Experience Section */}
-                {Array.isArray(portfolioMeta?.experience) && portfolioMeta.experience.length > 0 && (
-                  <div className="dashboard-card rounded-xl p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Experience</h3>
-                    <div className="space-y-3">
-                      {portfolioMeta.experience.map((e: any, idx: number) => (
-                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
-                          <div className="font-semibold text-white">{e?.role || e?.title || 'Role'}</div>
-                          <div className="text-gray-300 text-sm mt-1">
-                            {(e?.company || e?.organisation || 'Company') +
-                              (e?.startDate || e?.endDate ? ` • ${e?.startDate || ''} – ${e?.endDate || ''}` : '')}
-                          </div>
-                          {e?.description && (
-                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
-                              {e.description}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Education Section */}
-                {Array.isArray(portfolioMeta?.education) && portfolioMeta.education.length > 0 && (
-                  <div className="dashboard-card rounded-xl p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Education</h3>
-                    <div className="space-y-3">
-                      {portfolioMeta.education.map((e: any, idx: number) => (
-                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
-                          <div className="font-semibold text-white">{e?.qualification || e?.degree || 'Qualification'}</div>
-                          <div className="text-gray-300 text-sm mt-1">
-                            {(e?.institution || e?.school || 'Institution') +
-                              (e?.year || e?.endYear ? ` • ${e?.year || e?.endYear}` : '')}
-                          </div>
-                          {e?.notes && (
-                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
-                              {e.notes}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Projects Section */}
-                {Array.isArray(portfolioMeta?.projects) && portfolioMeta.projects.length > 0 && (
-                  <div className="dashboard-card rounded-xl p-6">
-                    <h3 className="text-xl font-semibold text-white mb-4">Projects</h3>
-                    <div className="space-y-3">
-                      {portfolioMeta.projects.map((p: any, idx: number) => (
-                        <div key={idx} className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
-                          <div className="font-semibold text-white">{p?.name || 'Project'}</div>
-                          {p?.url && (
-                            <a
-                              className="text-blue-300 hover:text-blue-200 text-sm mt-1 inline-block"
-                              href={p.url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {p.url}
-                            </a>
-                          )}
-                          {p?.description && (
-                            <div className="text-gray-300 whitespace-pre-wrap text-sm mt-3">
-                              {p.description}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 
@@ -1384,20 +1497,26 @@ export default function TalentDashboard() {
               </div>
 
               <div className="border border-gray-800 rounded-lg p-4">
-                <h3 className="text-white font-semibold mb-3">Connection Requests</h3>
+                <h3 className="text-white font-semibold mb-3">Business Connection Requests</h3>
+                <p className="text-gray-400 text-xs mb-3">Businesses requesting to connect with you</p>
                 {connLoading ? (
-                  <p className="text-gray-400">Loading connections…</p>
+                  <p className="text-gray-400">Loading connection requests…</p>
                 ) : connRequests.length === 0 ? (
-                  <p className="text-gray-400">No connection requests yet.</p>
+                  <p className="text-gray-400 text-sm">No connection requests from businesses yet.</p>
                 ) : (
                   <div className="space-y-3">
                     {connRequests.map((r) => (
-                      <div key={r.id} className="border border-gray-800 rounded-lg p-3">
-                        <p className="text-gray-200 text-sm">Pending request</p>
-                        <p className="text-gray-500 text-xs mt-1">
-                          Sent {new Date(r.created_at).toLocaleString()}
+                      <button
+                        key={r.id}
+                        onClick={() => setSelectedRequest(r)}
+                        className="w-full text-left border border-gray-800 rounded-lg p-3 hover:border-blue-500/50 hover:bg-gray-800/30 transition-colors"
+                      >
+                        <p className="text-gray-200 text-sm font-medium">{r.business_name || 'Business'}</p>
+                        <p className="text-gray-400 text-xs mt-1">
+                          Request received {new Date(r.created_at).toLocaleString()}
                         </p>
-                      </div>
+                        <p className="text-blue-400 text-xs mt-1">Click to view details and respond</p>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -1411,23 +1530,516 @@ export default function TalentDashboard() {
                   <p className="text-gray-400">No accepted connections yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {connAccepted.map((r) => (
+                    {connAccepted.map((r) => {
+                      const handleDiscontinue = async () => {
+                        if (!confirm('Are you sure you want to discontinue this connection? This action cannot be undone.')) {
+                          return
+                        }
+                        try {
+                          const { error } = await supabase
+                            .from('talent_connection_requests')
+                            .update({ 
+                              status: 'discontinued',
+                              responded_at: new Date().toISOString()
+                            })
+                            .eq('id', r.id)
+                          
+                          if (error) {
+                            alert('Failed to discontinue connection. Please try again.')
+                            console.error('Error discontinuing connection:', error)
+                          } else {
+                            // Reload connections
+                            await loadConnections()
+                            // Clear messaging if this was the selected business
+                            if (msgSelectedBusinessId === String(r.business_id)) {
+                              setMsgSelectedBusinessId(null)
+                              setMsgConversationId(null)
+                              setMsgItems([])
+                            }
+                          }
+                        } catch (err) {
+                          console.error('Error discontinuing connection:', err)
+                          alert('An error occurred. Please try again.')
+                        }
+                      }
+                      
+                      const handleOpenMessages = async () => {
+                        // Load messaging for this business
+                        await loadMessaging()
+                        setMsgSelectedBusinessId(String(r.business_id))
+                        await loadConversation(String(r.business_id))
+                      }
+                      
+                      return (
                       <div key={r.id} className="border border-gray-800 rounded-lg p-3">
-                        <p className="text-gray-200 text-sm">Connected</p>
-                        <p className="text-gray-500 text-xs mt-1">
-                          Accepted {r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}
-                        </p>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-gray-200 text-sm font-semibold">{r.business_name || 'Business'}</p>
+                            <p className="text-gray-500 text-xs mt-1">
+                              Accepted {r.responded_at ? new Date(r.responded_at).toLocaleString() : '—'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={handleOpenMessages}
+                              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors"
+                            >
+                              Messages
+                            </button>
+                            <button
+                              onClick={() => {
+                                router.push(`/dashboard/business/view?id=${r.business_id}&from_connection=${r.id}`)
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold transition-colors"
+                            >
+                              View Business
+                            </button>
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                setVideoChatLoading(true)
+                                setVideoChatError(null)
+                                try {
+                                  const { data: sessionRes } = await supabase.auth.getSession()
+                                  if (!sessionRes?.session?.user?.email) {
+                                    throw new Error('Please sign in to start video chat')
+                                  }
+                                  
+                                  // Get access token for server-side authentication
+                                  const accessToken = sessionRes.session.access_token
+                                  
+                                  // Initiate video chat
+                                  const response = await fetch('/api/video-chat/initiate', {
+                                    method: 'POST',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      'Authorization': `Bearer ${accessToken}`,
+                                    },
+                                    body: JSON.stringify({
+                                      connection_request_id: r.id,
+                                      initiated_by: 'talent',
+                                      recording_enabled: true
+                                    })
+                                  })
+                                  
+                                  if (!response.ok) {
+                                    const errorText = await response.text()
+                                    throw new Error(errorText || `HTTP error! status: ${response.status}`)
+                                  }
+                                  
+                                  const data = await response.json()
+                                  
+                                  if (!data.success) {
+                                    throw new Error(data.error || 'Failed to initiate video chat')
+                                  }
+                                  
+                                  if (data.session) {
+                                    setVideoChatSession({
+                                      ...data.session,
+                                      businessId: r.business_id,
+                                      businessName: r.business_name || 'Business',
+                                      talentName: talentProfile?.name || 'Talent'
+                                    })
+                                  } else {
+                                    throw new Error('Invalid response from server')
+                                  }
+                                } catch (err: any) {
+                                  console.error('[Talent Dashboard] Video chat error:', err)
+                                  setVideoChatError(err.message || 'Failed to start video chat')
+                                  alert(err.message || 'Failed to start video chat')
+                                } finally {
+                                  setVideoChatLoading(false)
+                                }
+                              }}
+                              disabled={videoChatLoading}
+                              className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold transition-colors disabled:opacity-60"
+                            >
+                              {videoChatLoading ? 'Starting...' : 'Video Chat'}
+                            </button>
+                            <button
+                              onClick={handleDiscontinue}
+                              className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors"
+                            >
+                              Discontinue
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    ))}
+                    )})}
+                  </div>
+                )}
+              </div>
+
+              {/* Declined Business Requests */}
+              <div className="border border-gray-800 rounded-lg p-4 md:col-span-2">
+                <h3 className="text-white font-semibold mb-3">Declined Business Requests</h3>
+                <p className="text-gray-400 text-xs mb-3">Declined connection requests (automatically deleted after 30 days)</p>
+                {connLoading ? (
+                  <p className="text-gray-400">Loading declined requests…</p>
+                ) : connDeclined.length === 0 ? (
+                  <p className="text-gray-400 text-sm">No declined connection requests.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {connDeclined.map((r) => {
+                      const respondedAt = r.responded_at ? new Date(r.responded_at) : new Date(r.created_at)
+                      const now = new Date()
+                      const daysSinceDeclined = Math.floor((now.getTime() - respondedAt.getTime()) / (1000 * 60 * 60 * 24))
+                      const daysRemaining = Math.max(0, 30 - daysSinceDeclined)
+                      
+                      return (
+                        <div
+                          key={r.id}
+                          className="border border-gray-800 rounded-lg p-3 hover:border-gray-700 transition-colors"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-gray-200 text-sm font-medium">{r.business_name || 'Business'}</p>
+                              <p className="text-gray-400 text-xs mt-1">
+                                Declined {respondedAt.toLocaleString()}
+                              </p>
+                              {daysRemaining > 0 ? (
+                                <p className="text-orange-400 text-xs mt-1">
+                                  Will be deleted in {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'}
+                                </p>
+                              ) : (
+                                <p className="text-red-400 text-xs mt-1">
+                                  Expired - will be deleted soon
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  router.push(`/dashboard/business/view?id=${r.business_id}&from_connection_request=${r.id}&review_declined=true`)
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-200 hover:bg-blue-500/30 text-xs"
+                              >
+                                Review Business
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Permanently delete this declined connection request? This action cannot be undone.`)) {
+                                    return
+                                  }
+                                  try {
+                                    const { error } = await supabase
+                                      .from('talent_connection_requests')
+                                      .delete()
+                                      .eq('id', r.id)
+                                    
+                                    if (error) throw error
+                                    
+                                    // Remove from local state
+                                    setConnDeclined((prev) => prev.filter((req) => req.id !== r.id))
+                                  } catch (err: any) {
+                                    console.error('Error deleting declined request:', err)
+                                    alert(err.message || 'Failed to delete declined request. Please try again.')
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 hover:bg-red-500/30 disabled:opacity-60 text-xs"
+                              >
+                                Delete Now
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
             </div>
 
+            {/* Messaging UI - shown when a business is selected */}
+            {msgSelectedBusinessId && (
+              <div className="mt-6 border border-gray-800 rounded-lg overflow-hidden">
+                <div className="px-4 py-3 bg-gray-900/40 border-b border-gray-800 flex items-center justify-between">
+                  <p className="text-gray-300 font-medium">
+                    {(() => {
+                      const business = connAccepted.find((r) => String(r.business_id) === String(msgSelectedBusinessId))
+                      const businessName = business?.business_name || 'Business'
+                      return `Messages with ${businessName}`
+                    })()}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setMsgSelectedBusinessId(null)
+                      setMsgConversationId(null)
+                      setMsgItems([])
+                    }}
+                    className="text-gray-400 hover:text-white transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {msgError && (
+                  <div className="p-4 border-b border-gray-800 bg-red-500/10 text-red-200 text-sm">
+                    {msgError}
+                  </div>
+                )}
+
+                {msgLoading && (
+                  <div className="p-6 text-center">
+                    <p className="text-gray-400">Loading messages…</p>
+                  </div>
+                )}
+
+                {!msgLoading && msgConversationId === null && !msgError && (
+                  <div className="p-6 text-center">
+                    <p className="text-gray-300 mb-2">No messages yet</p>
+                    <p className="text-gray-500 text-sm">Start the conversation by sending a message below.</p>
+                  </div>
+                )}
+
+                {!msgLoading && msgConversationId && (
+                  <div className="p-4 space-y-3 max-h-[300px] overflow-auto bg-gray-900/20">
+                    {msgItems.length === 0 ? (
+                      <p className="text-gray-400 text-center">No messages yet.</p>
+                    ) : (
+                      msgItems.map((m) => (
+                        <div
+                          key={m.id}
+                          className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                            m.sender_type === 'talent'
+                              ? 'ml-auto bg-blue-500/20 border border-blue-500/30 text-blue-100'
+                              : 'mr-auto bg-gray-800/60 border border-gray-700 text-gray-100'
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap">{m.body}</p>
+                          <p className="text-[11px] text-gray-400 mt-1">
+                            {new Date(m.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {msgSelectedBusinessId && (
+                  <div className="p-4 border-t border-gray-800 bg-gray-900/20">
+                    <div className="flex items-end gap-3">
+                      <textarea
+                        value={msgBody}
+                        onChange={(e) => setMsgBody(e.target.value)}
+                        placeholder="Write a message…"
+                        rows={2}
+                        className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                      />
+                      <button
+                        onClick={sendMessage}
+                        disabled={msgLoading || !msgBody.trim()}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+                      >
+                        Send
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      If the connection is expired or revoked, messaging will be blocked.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Connection Request Detail Modal */}
+            {selectedRequest && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                <div className="bg-slate-900 border border-gray-800 rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-white">
+                      Connection Request Details
+                    </h2>
+                    <button
+                      onClick={() => setSelectedRequest(null)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* Business Info */}
+                    <div>
+                      <h3 className="text-lg font-semibold text-white mb-2">
+                        {selectedRequest.business_name || 'Business'}
+                      </h3>
+                      <p className="text-gray-400 text-sm">
+                        Connection request received on {new Date(selectedRequest.created_at).toLocaleString()}
+                      </p>
+                    </div>
+
+                    {/* Status Badge */}
+                    {(selectedRequest.status === 'pending' || selectedRequest.status === 'waiting_for_review') && (
+                      <div className={`p-3 border rounded-lg ${
+                        selectedRequest.status === 'waiting_for_review'
+                          ? 'bg-orange-500/10 border-orange-500/30'
+                          : 'bg-yellow-500/10 border-yellow-500/30'
+                      }`}>
+                        <p className={`text-sm ${
+                          selectedRequest.status === 'waiting_for_review'
+                            ? 'text-orange-300'
+                            : 'text-yellow-300'
+                        }`}>
+                          {selectedRequest.status === 'waiting_for_review'
+                            ? '📋 This connection request is waiting for your review. Review their profile and accept or decline the request.'
+                            : '⏳ This business has requested to connect with you. Review their profile and accept or decline the request.'}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-800 gap-3">
+                      <button
+                        onClick={() => setSelectedRequest(null)}
+                        className="px-4 py-2 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
+                      >
+                        Close
+                      </button>
+                      <div className="flex items-center gap-3">
+                        {/* View Business Profile Button */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              // Navigate to business profile view page with business_id parameter
+                              router.push(`/dashboard/business/view?id=${selectedRequest.business_id}&from_connection_request=${selectedRequest.id}`)
+                              setSelectedRequest(null)
+                            } catch (err) {
+                              console.error('Error navigating to business profile:', err)
+                              alert('Failed to load business profile. Please try again.')
+                            }
+                          }}
+                          className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-semibold"
+                        >
+                          View Business Profile
+                        </button>
+                        
+                        {/* Accept/Reject buttons (only show for pending or waiting_for_review requests) */}
+                        {(selectedRequest.status === 'pending' || selectedRequest.status === 'waiting_for_review') && (
+                          <>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Accept connection request from ${selectedRequest.business_name || 'this business'}? You'll be able to message and collaborate with them.`)) {
+                                  return
+                                }
+                                
+                                try {
+                                  // Get the current user's talent profile ID
+                                  const { data: sessionRes } = await supabase.auth.getSession()
+                                  const uid = sessionRes.session?.user?.id
+                                  if (!uid) {
+                                    throw new Error('Please sign in to accept connection requests.')
+                                  }
+                                  
+                                  const talentRes = await supabase
+                                    .from('talent_profiles')
+                                    .select('id')
+                                    .eq('user_id', uid)
+                                    .single()
+                                  
+                                  if (talentRes.error || !talentRes.data?.id) {
+                                    throw new Error('Talent profile not found. Please complete your profile first.')
+                                  }
+                                  
+                                  const talentId = String(talentRes.data.id)
+                                  
+                                  const { error } = await supabase
+                                    .from('talent_connection_requests')
+                                    .update({ 
+                                      status: 'accepted',
+                                      responded_at: new Date().toISOString()
+                                    })
+                                    .eq('id', selectedRequest.id)
+                                    .eq('talent_id', talentId) // Ensure we're updating the correct request
+                                  
+                                  if (error) {
+                                    console.error('Error updating connection request:', error)
+                                    throw error
+                                  }
+                                  
+                                  // Verify the update was successful by checking the response
+                                  const verifyRes = await supabase
+                                    .from('talent_connection_requests')
+                                    .select('status, talent_id')
+                                    .eq('id', selectedRequest.id)
+                                    .single()
+                                  
+                                  if (verifyRes.error) {
+                                    console.error('Verification query error:', verifyRes.error)
+                                    throw new Error(`Failed to verify update: ${verifyRes.error.message}. Please check if you have permission to update this request.`)
+                                  }
+                                  
+                                  if (!verifyRes.data || verifyRes.data.status !== 'accepted') {
+                                    console.error('Update verification failed:', { 
+                                      expected: 'accepted', 
+                                      actual: verifyRes.data?.status,
+                                      requestId: selectedRequest.id,
+                                      talentId: talentId,
+                                      requestTalentId: verifyRes.data?.talent_id
+                                    })
+                                    throw new Error(`Update verification failed. Status is still '${verifyRes.data?.status || 'unknown'}'. The update may have been blocked by permissions.`)
+                                  }
+                                  
+                                  // Create a conversation for messaging (if it doesn't exist)
+                                  await ensureConversation(talentId, String(selectedRequest.business_id))
+                                  
+                                  alert('Connection accepted! You can now message and collaborate with this business.')
+                                  setSelectedRequest(null)
+                                  
+                                  // Reload connections to reflect the updated status
+                                  await loadConnections()
+                                } catch (err: any) {
+                                  console.error('Error accepting connection:', err)
+                                  alert(err.message || 'Failed to accept connection request. Please try again.')
+                                }
+                              }}
+                              className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-semibold"
+                            >
+                              Accept Connection
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Decline connection request from ${selectedRequest.business_name || 'this business'}? This action cannot be undone.`)) {
+                                  return
+                                }
+                                
+                                try {
+                                  const { error } = await supabase
+                                    .from('talent_connection_requests')
+                                    .update({ 
+                                      status: 'rejected', // Use 'rejected' instead of 'declined' to match constraint
+                                      responded_at: new Date().toISOString()
+                                    })
+                                    .eq('id', selectedRequest.id)
+                                  
+                                  if (error) throw error
+                                  
+                                  alert('Connection request declined.')
+                                  setSelectedRequest(null)
+                                  await loadConnections()
+                                } catch (err: any) {
+                                  console.error('Error declining connection:', err)
+                                  alert(err.message || 'Failed to decline connection request. Please try again.')
+                                }
+                              }}
+                              className="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold"
+                            >
+                              Decline
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
-        {activeTab === 'messages' && (
+        {/* Messages tab removed - messaging is now integrated into Connections tab */}
+        {false && activeTab === 'messages' && (
           <div className="dashboard-card rounded-xl p-6">
             <div className="flex items-start justify-between gap-4 mb-6">
               <div>
@@ -1472,27 +2084,41 @@ export default function TalentDashboard() {
                     <p className="text-gray-300 font-medium">Connected businesses</p>
                   </div>
                   <div className="divide-y divide-gray-800">
-                    {msgBusinesses.map((b) => (
-                      <button
-                        key={b.id}
-                        onClick={() => loadConversation(b.id)}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-800/50 transition-colors ${
-                          msgSelectedBusinessId === b.id ? 'bg-gray-800/60' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-white font-medium truncate">{b.name || 'Business'}</p>
-                          <span className="text-xs text-gray-500">Open</span>
-                        </div>
-                      </button>
-                    ))}
+                    {msgBusinesses.map((b) => {
+                      // Display the business name, with fallback to 'Business' if not available
+                      const displayName = (b.name && b.name.trim() && b.name !== 'Business') ? b.name : 'Business'
+                      return (
+                        <button
+                          key={b.id}
+                          onClick={() => loadConversation(b.id)}
+                          className={`w-full text-left px-4 py-3 hover:bg-gray-800/50 transition-colors ${
+                            msgSelectedBusinessId === b.id ? 'bg-gray-800/60' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-white font-medium truncate" title={displayName}>{displayName}</p>
+                            <span className="text-xs text-gray-500">Open</span>
+                          </div>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
                 {/* Conversation */}
                 <div className="md:col-span-2 border border-gray-800 rounded-lg overflow-hidden">
                   <div className="px-4 py-3 bg-gray-900/40 border-b border-gray-800">
-                    <p className="text-gray-300 font-medium">Conversation</p>
+                    <p className="text-gray-300 font-medium">
+                      {msgSelectedBusinessId
+                        ? (() => {
+                            const business = msgBusinesses.find((b) => String(b.id) === String(msgSelectedBusinessId))
+                            const businessName = (business?.name && business.name.trim() && business.name !== 'Business') 
+                              ? business.name 
+                              : 'Business'
+                            return `Conversation with ${businessName}`
+                          })()
+                        : 'Conversation'}
+                    </p>
                   </div>
 
                   {!msgSelectedBusinessId && (
@@ -1561,6 +2187,37 @@ export default function TalentDashboard() {
           </div>
         )}
       </div>
+      
+      {/* Video Chat Modal */}
+      {videoChatSession && (
+        <VideoChat
+          sessionId={videoChatSession.id}
+          roomId={videoChatSession.room_id}
+          roomToken={videoChatSession.room_token}
+          onEnd={() => {
+            setVideoChatSession(null)
+            setVideoChatError(null)
+          }}
+          recordingEnabled={videoChatSession.recording_enabled || false}
+          talentName={videoChatSession.talentName || 'Talent'}
+          businessName={videoChatSession.businessName || 'Business'}
+        />
+      )}
+      
+      {/* Video Chat Error Display */}
+      {videoChatError && (
+        <div className="fixed top-4 right-4 z-50 bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg max-w-md">
+          <div className="flex items-center justify-between gap-4">
+            <p>{videoChatError}</p>
+            <button
+              onClick={() => setVideoChatError(null)}
+              className="text-red-400 hover:text-red-200"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

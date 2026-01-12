@@ -4,6 +4,28 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import LocationDropdownsString from '@/components/LocationDropdownsString'
+
+// Helper function to geocode location using Mapbox
+async function geocodeLocation(location: string): Promise<{ lat: number; lng: number } | null> {
+  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
+  if (!token || !location.trim()) return null
+
+  try {
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json?access_token=${token}&limit=1&country=AU`
+    const response = await fetch(url)
+    const data = await response.json()
+    
+    if (data.features && data.features.length > 0) {
+      const [lng, lat] = data.features[0].center
+      return { lat, lng }
+    }
+    return null
+  } catch (error) {
+    console.error('Geocoding error:', error)
+    return null
+  }
+}
 
 type TalentProfileRow = Record<string, any>
 
@@ -37,6 +59,9 @@ export default function EditTalentProfilePage() {
     state: '',
     country: '',
     phone: '',
+    search_visible: false,
+    search_summary: '',
+    availability_description: '',
   })
 
   useEffect(() => {
@@ -92,6 +117,9 @@ export default function EditTalentProfilePage() {
             state: (typeof row.state === 'string' && row.state) || '',
             country: (typeof row.country === 'string' && row.country) || '',
             phone: (typeof row.phone === 'string' && row.phone) || '',
+            search_visible: typeof row.search_visible === 'boolean' ? row.search_visible : false,
+            search_summary: (typeof row.search_summary === 'string' && row.search_summary) || '',
+            availability_description: (typeof row.availability_description === 'string' && row.availability_description) || '',
           })
         }
 
@@ -165,28 +193,48 @@ export default function EditTalentProfilePage() {
         return
       }
 
-      // 2) Best-effort optional fields (skip missing columns)
+      // 2) Update all fields in a single query (including location fields even if empty)
       const skills = formData.skills
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
 
-      const optionalUpdates: Array<{ k: string; v: any }> = [
-        { k: 'headline', v: formData.headline.trim() || null },
-        { k: 'title', v: formData.title.trim() || null },
-        { k: 'bio', v: formData.bio.trim() || null },
-        { k: 'skills', v: skills.length ? skills : null },
-        { k: 'location', v: formData.location.trim() || null },
-        { k: 'city', v: formData.city.trim() || null },
-        { k: 'state', v: formData.state.trim() || null },
-        { k: 'country', v: formData.country.trim() || null },
-        { k: 'phone', v: formData.phone.trim() || null },
-      ]
+      const updateData: Record<string, any> = {
+        headline: formData.headline.trim() || null,
+        title: formData.title.trim() || null,
+        bio: formData.bio.trim() || null,
+        skills: skills.length ? skills : null,
+        location: formData.location.trim() || null,
+        // Always include location fields (country, state, city) even if empty
+        country: formData.country.trim() || null,
+        state: formData.state.trim() || null,
+        city: formData.city.trim() || null,
+        phone: formData.phone.trim() || null,
+      }
 
-      for (const f of optionalUpdates) {
-        if (f.v === null) continue
-        const upd = await supabase.from('talent_profiles').update({ [f.k]: f.v }).eq('id', createdId)
-        if (upd.error && !isMissingColumnErr(upd.error)) break
+      // Geocode location if city, state, or country are provided
+      if (updateData.city || updateData.state || updateData.country) {
+        try {
+          const locationParts = [updateData.city, updateData.state, updateData.country].filter(Boolean)
+          if (locationParts.length > 0) {
+            const locationString = locationParts.join(', ')
+            const geocodeResult = await geocodeLocation(locationString)
+            if (geocodeResult) {
+              updateData.latitude = geocodeResult.lat
+              updateData.longitude = geocodeResult.lng
+            }
+          }
+        } catch (err) {
+          console.warn('Geocoding failed, continuing without coordinates:', err)
+          // Continue saving without coordinates - they can be added later
+        }
+      }
+
+      // Do a single update with all fields
+      const upd = await supabase.from('talent_profiles').update(updateData).eq('id', createdId)
+      if (upd.error && !isMissingColumnErr(upd.error)) {
+        console.error('Error updating profile fields:', upd.error)
+        // Continue anyway - the profile was created successfully
       }
 
       setTalentId(createdId)
@@ -248,26 +296,73 @@ export default function EditTalentProfilePage() {
         return
       }
 
-      // Best-effort per-field updates (skip missing columns)
-      const optionalUpdates: Array<{ k: string; v: any }> = [
+      // Build update object with all fields (including empty strings for location fields)
+      const updateData: Record<string, any> = {}
+      
+      // Add optional fields only if they exist in schema
+      // Validate search summary if search_visible is true
+      if (formData.search_visible && !formData.search_summary.trim()) {
+        setErrors({ search_summary: 'Search summary is required when profile is visible to businesses' })
+        setIsSaving(false)
+        return
+      }
+
+      const optionalFields = [
         { k: 'headline', v: formData.headline.trim() || null },
         { k: 'title', v: formData.title.trim() || null },
         { k: 'bio', v: formData.bio.trim() || null },
         { k: 'skills', v: skills.length > 0 ? skills : null },
         { k: 'location', v: formData.location.trim() || null },
-        { k: 'city', v: formData.city.trim() || null },
-        { k: 'state', v: formData.state.trim() || null },
-        { k: 'country', v: formData.country.trim() || null },
         { k: 'phone', v: formData.phone.trim() || null },
       ]
 
-      for (const f of optionalUpdates) {
-        if (f.v === null) continue
-        const res = await supabase.from('talent_profiles').update({ [f.k]: f.v }).eq('id', talentId)
-        if (res.error && !isMissingColumnErr(res.error)) {
-          setErrors({ submit: res.error.message })
-          return
+      // Always include location fields (country, state, city) even if empty
+      // This ensures they can be cleared/set properly
+      updateData.country = formData.country.trim() || null
+      updateData.state = formData.state.trim() || null
+      updateData.city = formData.city.trim() || null
+
+      // Include search visibility and summary fields
+      updateData.search_visible = formData.search_visible || false
+      updateData.search_summary = formData.search_visible ? (formData.search_summary.trim() || null) : null
+      updateData.availability_description = formData.availability_description.trim() || null
+
+      // Geocode location if city, state, or country are provided
+      if (updateData.city || updateData.state || updateData.country) {
+        try {
+          const locationParts = [updateData.city, updateData.state, updateData.country].filter(Boolean)
+          if (locationParts.length > 0) {
+            const locationString = locationParts.join(', ')
+            const geocodeResult = await geocodeLocation(locationString)
+            if (geocodeResult) {
+              updateData.latitude = geocodeResult.lat
+              updateData.longitude = geocodeResult.lng
+            }
+          }
+        } catch (err) {
+          console.warn('Geocoding failed, continuing without coordinates:', err)
+          // Continue saving without coordinates - they can be added later
         }
+      } else {
+        // Clear coordinates if location fields are cleared
+        updateData.latitude = null
+        updateData.longitude = null
+      }
+
+      // Add other optional fields
+      for (const f of optionalFields) {
+        if (f.v !== null && f.v !== undefined) {
+          updateData[f.k] = f.v
+        }
+      }
+
+      // Do a single update with all fields
+      const res = await supabase.from('talent_profiles').update(updateData).eq('id', talentId)
+      
+      if (res.error && !isMissingColumnErr(res.error)) {
+        setErrors({ submit: res.error.message || 'Failed to update profile. Please try again.' })
+        setIsSaving(false)
+        return
       }
 
       router.push('/dashboard/talent')
@@ -399,41 +494,14 @@ export default function EditTalentProfilePage() {
           </div>
 
           {/* Location */}
-          <div className="grid md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">City</label>
-              <input
-                type="text"
-                name="city"
-                value={formData.city}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="City"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">State</label>
-              <input
-                type="text"
-                name="state"
-                value={formData.state}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="State"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Country</label>
-              <input
-                type="text"
-                name="country"
-                value={formData.country}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="Country"
-              />
-            </div>
-          </div>
+          <LocationDropdownsString
+            country={formData.country || ''}
+            state={formData.state || ''}
+            city={formData.city || ''}
+            onCountryChange={(value) => setFormData(prev => ({ ...prev, country: value }))}
+            onStateChange={(value) => setFormData(prev => ({ ...prev, state: value }))}
+            onCityChange={(value) => setFormData(prev => ({ ...prev, city: value }))}
+          />
 
           {/* Phone */}
           <div>
@@ -448,10 +516,85 @@ export default function EditTalentProfilePage() {
             />
           </div>
 
-          {/* Error Message */}
-          {errors.submit && (
+          {/* Business Search Visibility Section */}
+          <div className="border-t border-gray-700 pt-6 mt-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Business Search Visibility</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Control whether your profile is visible to businesses searching for talent. When enabled, businesses will see a brief summary you write (not your full profile) and can request a connection.
+            </p>
+
+            {/* Search Visible Toggle */}
+            <div className="mb-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.search_visible}
+                  onChange={(e) => setFormData(prev => ({ ...prev, search_visible: e.target.checked }))}
+                  className="w-5 h-5 rounded border-gray-600 bg-white text-blue-500 focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-gray-300">
+                  Make my profile visible to businesses in search
+                </span>
+              </label>
+              <p className="text-xs text-gray-400 mt-1 ml-8">
+                When enabled, businesses can find you on the Business Map and see your search summary below
+              </p>
+            </div>
+
+            {/* Search Summary */}
+            {formData.search_visible && (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Business Search Summary <span className="text-red-400">*</span>
+                  </label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Write a brief summary that businesses will see when searching for talent. Include your role, experience, location, and what you're looking for. Example: "Actor with 10 years experience, lives in Sydney, looking for acting roles in the next 3 months"
+                  </p>
+                  <textarea
+                    name="search_summary"
+                    value={formData.search_summary}
+                    onChange={handleChange}
+                    required={formData.search_visible}
+                    maxLength={500}
+                    rows={4}
+                    className={`w-full px-4 py-3 bg-white border rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-y ${
+                      errors.search_summary ? 'border-red-500' : 'border-blue-500/20'
+                    }`}
+                    placeholder="e.g., Actor with 10 years experience, lives in Sydney, looking for acting roles in the next 3 months"
+                  />
+                  <p className={`text-xs mt-1 ${formData.search_summary.length >= 500 ? 'text-red-400' : 'text-gray-400'}`}>
+                    {formData.search_summary.length} / 500 characters
+                  </p>
+                  {errors.search_summary && <p className="mt-1 text-sm text-red-400">{errors.search_summary}</p>}
+                </div>
+
+                {/* Availability Description */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Availability Description (Optional)
+                  </label>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Additional details about when you're looking for roles, availability, or preferences
+                  </p>
+                  <textarea
+                    name="availability_description"
+                    value={formData.availability_description}
+                    onChange={handleChange}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-y"
+                    placeholder="e.g., Looking for acting roles in the next 3 months, available for auditions on weekends"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Error Messages */}
+          {(errors.submit || errors.search_summary) && (
             <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
-              <p className="text-sm text-red-400">{errors.submit}</p>
+              {errors.submit && <p className="text-sm text-red-400">{errors.submit}</p>}
+              {errors.search_summary && <p className="text-sm text-red-400">{errors.search_summary}</p>}
             </div>
           )}
 

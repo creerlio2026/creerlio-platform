@@ -163,19 +163,42 @@ export default function JobsPage() {
 
     setApplyingJobId(jobId)
     try {
-      const payload = { user_id: userId, job_id: jobId }
-      const tables = ['job_applications', 'applications']
-      for (const table of tables) {
-        const res: any = await supabase.from(table).insert(payload as any)
-        if (!res.error) {
-          setAppliedJobs((prev) => new Set([...Array.from(prev), jobId]))
-          return
-        }
+      // First, get the talent profile ID for this user
+      const { data: talentProfile, error: profileError } = await supabase
+        .from('talent_profiles')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (profileError || !talentProfile) {
+        alert('Please complete your talent profile before applying to jobs.')
+        router.push('/dashboard/talent/edit')
+        return
       }
-      alert('Job applications are not available yet (missing applications table or permissions).')
+
+      const payload = { 
+        user_id: userId, 
+        job_id: Number(jobId),
+        talent_profile_id: talentProfile.id,
+        status: 'applied'
+      }
+      
+      const res: any = await supabase.from('applications').insert(payload as any)
+      
+      if (res.error) {
+        // Check if it's a duplicate application error
+        if (res.error.code === '23505' || res.error.message?.includes('unique')) {
+          alert('You have already applied to this job.')
+          setAppliedJobs((prev) => new Set([...Array.from(prev), jobId]))
+        } else {
+          throw res.error
+        }
+      } else {
+        setAppliedJobs((prev) => new Set([...Array.from(prev), jobId]))
+      }
     } catch (error: any) {
       console.error('Error applying to job:', error)
-      alert('Failed to apply. Please try again.')
+      alert(error.message || 'Failed to apply. Please try again.')
     } finally {
       setApplyingJobId(null)
     }

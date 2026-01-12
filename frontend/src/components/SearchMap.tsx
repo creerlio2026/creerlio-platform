@@ -24,6 +24,7 @@ interface SearchMapProps {
   center?: { lat: number; lng: number }
   zoom?: number
   isExpanded?: boolean
+  onMarkerClick?: (markerId: string | number) => void
 }
 
 type MapStyle = 'dark' | 'light' | 'satellite' | 'streets'
@@ -35,7 +36,7 @@ const mapStyles: Record<MapStyle, string> = {
   streets: 'mapbox://styles/mapbox/streets-v12',
 }
 
-export default function SearchMap({ markers, className = '', center, zoom = 11, isExpanded = false }: SearchMapProps) {
+export default function SearchMap({ markers, className = '', center, zoom = 11, isExpanded = false, onMarkerClick }: SearchMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markersRef = useRef<any[]>([])
@@ -116,12 +117,13 @@ export default function SearchMap({ markers, className = '', center, zoom = 11, 
         el.style.cursor = 'pointer'
         el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)'
 
-        // Create popup
+        // Create popup (basic popup - custom modal will show on click)
         const popup = new mapboxgl.Popup({ offset: 25 })
           .setHTML(`
             <div class="text-black">
               <h3 class="font-semibold text-sm mb-1">${markerData.title}</h3>
               ${markerData.description ? `<p class="text-xs text-gray-600">${markerData.description}</p>` : ''}
+              ${onMarkerClick ? '<p class="text-xs text-blue-600 mt-1 cursor-pointer">Click for details →</p>' : ''}
             </div>
           `)
 
@@ -130,6 +132,22 @@ export default function SearchMap({ markers, className = '', center, zoom = 11, 
           .setLngLat([markerData.lng, markerData.lat])
           .setPopup(popup)
           .addTo(map.current)
+
+        // Add click handler if provided
+        if (onMarkerClick) {
+          // Handle marker click - click on marker element opens custom modal
+          el.addEventListener('click', (e) => {
+            e.stopPropagation()
+            onMarkerClick(markerData.id)
+          })
+          
+          // Close default popup when marker is clicked (we use custom modal instead)
+          marker.on('click', (e) => {
+            e.originalEvent?.stopPropagation()
+            popup.remove() // Close default popup
+            onMarkerClick(markerData.id) // Open custom modal
+          })
+        }
 
         markersRef.current.push(marker)
       })

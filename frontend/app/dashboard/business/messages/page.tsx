@@ -8,17 +8,46 @@ import { supabase } from '@/lib/supabase'
 export default function BusinessMessagesPage() {
   const router = useRouter()
   const params = useSearchParams()
-  const initialTalentId = params.get('talentId')
+  // Support both 'talent_id' and 'talentId' for backward compatibility
+  const initialTalentId = params.get('talent_id') || params.get('talentId')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const talentId = initialTalentId
+  // Initialize talentId from URL params (support both talent_id and talentId)
+  const initialTalentIdFromUrl = params.get('talent_id') || params.get('talentId')
+  const [talentId, setTalentId] = useState<string | null>(initialTalentIdFromUrl || initialTalentId)
+  const [talentName, setTalentName] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [items, setItems] = useState<Array<{ id: string; sender_type: string; body: string; created_at: string }>>([])
   const [body, setBody] = useState('')
   const [consentOpen, setConsentOpen] = useState(false)
   const [consentReason, setConsentReason] = useState('')
   const [consentStatus, setConsentStatus] = useState<string | null>(null)
+  
+  // Load talent name when talentId is available
+  useEffect(() => {
+    if (!talentId) return
+    
+    async function loadTalentName() {
+      try {
+        // Try to get name from talent_profiles
+        const { data: talentRes } = await supabase
+          .from('talent_profiles')
+          .select('name, title')
+          .eq('id', talentId)
+          .maybeSingle()
+        
+        if (!talentRes.error && talentRes.data) {
+          const name = talentRes.data.name || talentRes.data.title || 'Talent'
+          setTalentName(name)
+        }
+      } catch (err) {
+        console.error('[Messages] Error loading talent name:', err)
+      }
+    }
+    
+    loadTalentName()
+  }, [talentId])
 
   const businessIdFallback = useMemo(() => {
     // In this repo state, business dashboards often use auth.uid() as the business_id.
@@ -76,7 +105,7 @@ export default function BusinessMessagesPage() {
         .limit(1)
       const row: any = (res.data || [])[0] || null
       if (!row) {
-        setConsentStatus('No consent request yet')
+        setConsentStatus(null) // Don't show consent status if no request exists
         return
       }
       if (row.status === 'approved') {
@@ -86,7 +115,8 @@ export default function BusinessMessagesPage() {
       }
       setConsentStatus(row.status === 'pending' ? 'Pending' : row.status === 'denied' ? 'Denied' : String(row.status))
     } catch {
-      // ignore
+      // ignore - consent status is optional
+      setConsentStatus(null)
     }
   }
 
@@ -100,22 +130,21 @@ export default function BusinessMessagesPage() {
         return
       }
 
-      // Permission gate: must have an active grant
+      // Permission gate: must have an accepted connection request
       const gateRes = await supabase
-        .from('talent_access_grants')
-        .select('id, expires_at, revoked_at')
+        .from('talent_connection_requests')
+        .select('id, status, responded_at')
         .eq('talent_id', selectedTalentId)
         .eq('business_id', businessId)
-        .order('created_at', { ascending: false })
+        .eq('status', 'accepted')
+        .order('responded_at', { ascending: false })
         .limit(1)
 
       const gate = (gateRes.data || [])[0]
-      const isRevoked = !!gate?.revoked_at
-      const isExpired = gate?.expires_at ? new Date(gate.expires_at).getTime() <= Date.now() : true
-      if (!gate || isRevoked || isExpired) {
+      if (!gate || gate.status !== 'accepted') {
         setConversationId(null)
         setItems([])
-        setError(isRevoked ? 'Access revoked' : 'Connection expired')
+        setError('Connection not accepted. Please accept the connection request first.')
         return
       }
 
@@ -169,18 +198,17 @@ export default function BusinessMessagesPage() {
         return
       }
 
-      // Permission gate before write
+      // Permission gate before write: check for accepted connection
       const gateRes = await supabase
-        .from('talent_access_grants')
-        .select('id')
+        .from('talent_connection_requests')
+        .select('id, status')
         .eq('talent_id', talentId)
         .eq('business_id', businessId)
-        .is('revoked_at', null)
-        .gt('expires_at', new Date().toISOString())
+        .eq('status', 'accepted')
         .limit(1)
 
       if ((gateRes.data || []).length === 0) {
-        setError('Connection expired')
+        setError('Connection not accepted. Please accept the connection request first.')
         return
       }
 
@@ -289,6 +317,20 @@ export default function BusinessMessagesPage() {
   }
 
   useEffect(() => {
+    // Update talentId if it changes in URL params
+    const urlTalentId = params.get('talent_id') || params.get('talentId')
+    if (urlTalentId) {
+      if (urlTalentId !== talentId) {
+        setTalentId(urlTalentId)
+      }
+      // Load conversation when talentId is available
+      gateAndLoadConversation(urlTalentId).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params])
+  
+  // Also load conversation when talentId state changes
+  useEffect(() => {
     if (!talentId) return
     gateAndLoadConversation(talentId).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -297,33 +339,45 @@ export default function BusinessMessagesPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
       <header className="container mx-auto px-6 py-4 flex items-center justify-between border-b border-gray-800">
-        <Link href="/dashboard/business" className="flex items-center space-x-2">
+        <Link href="/dashboard/business?tab=connections" className="flex items-center space-x-2">
           <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-xl">C</span>
           </div>
           <span className="text-white text-2xl font-bold">Creerlio</span>
         </Link>
         <div className="flex items-center gap-3">
+          {talentId && (
+            <Link
+              href={`/portfolio/view?talent_id=${talentId}${params.get('request_id') ? `&request_id=${params.get('request_id')}` : ''}`}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg font-semibold transition-colors"
+            >
+              Back to Profile
+            </Link>
+          )}
           <button
-            onClick={() => router.push('/dashboard/business')}
+            onClick={() => router.push('/dashboard/business?tab=connections')}
             className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
           >
-            Back
+            Back to Dashboard
           </button>
         </div>
       </header>
 
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-6 py-8 max-w-4xl">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-white mb-2">Messages</h1>
-          <p className="text-gray-400 text-sm">Messaging is only available for active Talent Bank connections.</p>
+          {talentName ? (
+            <p className="text-gray-400 text-sm">Conversation with <span className="text-white font-semibold">{talentName}</span></p>
+          ) : (
+            <p className="text-gray-400 text-sm">Messaging is only available for accepted Talent connections.</p>
+          )}
         </div>
 
         {!talentId && (
           <div className="dashboard-card rounded-xl p-6">
-            <p className="text-gray-300 mb-3">Select a talent from your Talent Bank to start messaging.</p>
-            <Link href="/dashboard/business" className="text-blue-400 hover:text-blue-300 transition-colors">
-              Go to Talent Bank
+            <p className="text-gray-300 mb-3">Select a talent from your connections to start messaging.</p>
+            <Link href="/dashboard/business?tab=connections" className="text-blue-400 hover:text-blue-300 transition-colors">
+              Go to Talent Connections
             </Link>
           </div>
         )}
@@ -338,7 +392,9 @@ export default function BusinessMessagesPage() {
           <div className="dashboard-card rounded-xl overflow-hidden border border-gray-800">
             <div className="px-4 py-3 bg-gray-900/40 border-b border-gray-800 flex items-center justify-between">
               <div>
-                <p className="text-gray-300 font-medium">Conversation</p>
+                <p className="text-gray-300 font-medium">
+                  {talentName ? `Conversation with ${talentName}` : 'Conversation'}
+                </p>
                 {consentStatus ? <p className="text-xs text-gray-500 mt-1">Print/export consent: {consentStatus}</p> : null}
               </div>
               <div className="flex items-center gap-2">
@@ -360,26 +416,31 @@ export default function BusinessMessagesPage() {
               </div>
             </div>
 
-            <div className="p-4 space-y-3 max-h-[420px] overflow-auto">
+            <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto bg-gray-900/20">
               {loading && items.length === 0 ? (
-                <p className="text-gray-400">Loading…</p>
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="ml-3 text-gray-400">Loading messages…</p>
+                </div>
               ) : items.length === 0 ? (
-                <div>
-                  <p className="text-gray-300 mb-1">No messages yet</p>
-                  <p className="text-gray-500 text-sm">You’re connected, but no messages yet.</p>
+                <div className="text-center py-12">
+                  <p className="text-gray-300 mb-1 font-medium">No messages yet</p>
+                  <p className="text-gray-500 text-sm">Start the conversation by sending a message below.</p>
                 </div>
               ) : (
                 items.map((m) => (
                   <div
                     key={m.id}
-                    className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                    className={`max-w-[85%] rounded-lg px-4 py-3 ${
                       m.sender_type === 'business'
                         ? 'ml-auto bg-blue-500/20 border border-blue-500/30 text-blue-100'
                         : 'mr-auto bg-gray-800/60 border border-gray-700 text-gray-100'
                     }`}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{m.body}</p>
-                    <p className="text-[11px] text-gray-400 mt-1">{new Date(m.created_at).toLocaleString()}</p>
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{m.body}</p>
+                    <p className="text-[11px] text-gray-400 mt-2 opacity-75">
+                      {m.sender_type === 'business' ? 'You' : talentName || 'Talent'} • {new Date(m.created_at).toLocaleString()}
+                    </p>
                   </div>
                 ))
               )}
@@ -402,7 +463,7 @@ export default function BusinessMessagesPage() {
                   Send
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">If access expires or is revoked, messaging will be disabled.</p>
+              <p className="text-xs text-gray-500 mt-2">If the connection is discontinued, messaging will be disabled.</p>
             </div>
           </div>
         )}

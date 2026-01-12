@@ -14,8 +14,8 @@ export default function PortfolioPage() {
               Creerlio
             </Link>
             <div className="flex items-center gap-4">
-              <Link 
-                href="/dashboard/talent" 
+              <Link
+                href="/dashboard/talent"
                 className="text-slate-300 hover:text-blue-400 transition-colors"
               >
                 ← Back to Dashboard

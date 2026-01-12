@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import LocationDropdownsString from '@/components/LocationDropdownsString'
 
 interface BusinessProfile {
   id: string
@@ -165,7 +166,7 @@ export default function CreateJobPage() {
       for (const payload of candidates) {
         const ins: any = await supabase.from('jobs').insert(payload as any).select('id').maybeSingle()
         if (!ins.error) {
-          router.push('/dashboard/business')
+          router.push('/dashboard/business?tab=vacancies')
           return
         }
         lastErr = ins.error
@@ -251,41 +252,14 @@ export default function CreateJobPage() {
           </div>
 
           {/* Location */}
-          <div className="grid md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">City</label>
-              <input
-                type="text"
-                name="city"
-                value={formData.city}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="City"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">State</label>
-              <input
-                type="text"
-                name="state"
-                value={formData.state}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="State"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Country</label>
-              <input
-                type="text"
-                name="country"
-                value={formData.country}
-                onChange={handleChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                placeholder="Country"
-              />
-            </div>
-          </div>
+          <LocationDropdownsString
+            country={formData.country}
+            state={formData.state}
+            city={formData.city}
+            onCountryChange={(value) => setFormData(prev => ({ ...prev, country: value }))}
+            onStateChange={(value) => setFormData(prev => ({ ...prev, state: value }))}
+            onCityChange={(value) => setFormData(prev => ({ ...prev, city: value }))}
+          />
 
           {/* Skills */}
           <div className="grid md:grid-cols-2 gap-4">
@@ -353,6 +327,32 @@ export default function CreateJobPage() {
               className="w-4 h-4 text-blue-500 bg-white border-gray-300 rounded focus:ring-blue-500"
             />
             <label className="text-sm font-medium text-gray-300">Remote work allowed</label>
+          </div>
+
+          {/* Application Details */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Application URL</label>
+              <input
+                type="url"
+                name="application_url"
+                value={formData.application_url}
+                onChange={handleChange}
+                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                placeholder="https://example.com/apply"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Application Email</label>
+              <input
+                type="email"
+                name="application_email"
+                value={formData.application_email}
+                onChange={handleChange}
+                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                placeholder="jobs@example.com"
+              />
+            </div>
           </div>
 
           {/* Error Message */}

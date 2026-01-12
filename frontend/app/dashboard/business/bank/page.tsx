@@ -1,269 +1,850 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState, DragEvent, ChangeEvent } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-type BankItem = {
+interface BusinessBankItem {
   id: number
-  business_id: string
   user_id: string
-  item_type: 'document' | 'image' | 'video'
+  item_type: string
   title: string
   description?: string | null
+  file_url?: string | null
   file_path?: string | null
   file_type?: string | null
   file_size?: number | null
+  metadata?: any
   created_at: string
 }
+
+type ItemFilter = 'all' | 'image' | 'video' | 'text' | 'link' | 'logo' | 'business_introduction'
 
 const BUCKET = 'business-bank'
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 50 MB
 
-function safeFileName(name: string) {
-  return String(name || 'file')
-    .trim()
-    .replace(/[^\w.\-]+/g, '_')
-    .replace(/_+/g, '_')
-    .slice(0, 120)
-}
-
-function inferKind(file: File): 'image' | 'video' | 'document' {
-  const t = (file.type || '').toLowerCase()
-  if (t.startsWith('image/')) return 'image'
-  if (t.startsWith('video/')) return 'video'
-  return 'document'
-}
-
 export default function BusinessBankPage() {
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [businessId, setBusinessId] = useState<string | null>(null)
-  const [items, setItems] = useState<BankItem[]>([])
+  const router = useRouter()
+  const [items, setItems] = useState<BusinessBankItem[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isUploading, setIsUploading] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [filter, setFilter] = useState<ItemFilter>('all')
+  const [userId, setUserId] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({})
-  const [preview, setPreview] = useState<null | { kind: 'image' | 'video'; url: string; title: string }>(null)
-  const allInputRef = useRef<HTMLInputElement | null>(null)
-  const imgInputRef = useRef<HTMLInputElement | null>(null)
-  const vidInputRef = useRef<HTMLInputElement | null>(null)
-  const docInputRef = useRef<HTMLInputElement | null>(null)
+  const [preview, setPreview] = useState<
+    | { kind: 'image'; url: string; title: string }
+    | { kind: 'video'; url: string; title: string }
+    | null
+  >(null)
 
-  async function ensureThumb(path: string) {
-    if (!path) return
-    if (thumbUrls[path]) return
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 30)
-    if (!error && data?.signedUrl) setThumbUrls((p) => ({ ...p, [path]: data.signedUrl }))
-  }
+  // Text block form
+  const [textTitle, setTextTitle] = useState('')
+  const [textContent, setTextContent] = useState('')
 
-  async function loadBusinessId(uid: string) {
-    // Use user_id (canonical column per RLS policies)
-    const res = await supabase.from('business_profiles').select('id').eq('user_id', uid).maybeSingle()
-    if (!res.error && res.data?.id) return String(res.data.id)
-    return null
-  }
+  // Link form
+  const [linkTitle, setLinkTitle] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkDescription, setLinkDescription] = useState('')
 
-  async function reload() {
-    setLoading(true)
-    setError(null)
-    try {
-      const { data: sessionRes } = await supabase.auth.getSession()
-      const uid = sessionRes.session?.user?.id ?? null
-      if (!uid) {
-        setError('Please sign in as a Business to use Business Bank.')
-        setItems([])
-        return
-      }
-      const bid = await loadBusinessId(uid)
-      if (!bid) {
-        setError('No business profile found for this user. Create a business profile first.')
-        setItems([])
-        return
-      }
-      setBusinessId(bid)
+  // Business Introduction form
+  const [introVideoUrl, setIntroVideoUrl] = useState('')
+  const [introVideoTitle, setIntroVideoTitle] = useState('Business Introduction Video')
+  const [introVideoSource, setIntroVideoSource] = useState<'record' | 'upload' | 'link'>('link')
 
-      const res = await supabase
-        .from('business_bank_items')
-        .select('id,business_id,user_id,item_type,title,description,file_path,file_type,file_size,created_at')
-        .eq('business_id', bid)
-        .order('created_at', { ascending: false })
+  // Video recording state
+  const [recOpen, setRecOpen] = useState(false)
+  const [recBusy, setRecBusy] = useState(false)
+  const [recErr, setRecErr] = useState<string | null>(null)
+  const [recStream, setRecStream] = useState<MediaStream | null>(null)
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null)
+  const [recChunks, setRecChunks] = useState<BlobPart[]>([])
+  const recChunksRef = useRef<BlobPart[]>([])
+  const [isRecording, setIsRecording] = useState(false)
+  const [recPreviewUrl, setRecPreviewUrl] = useState<string | null>(null)
+  const [recMime, setRecMime] = useState<string>('video/webm')
+  const liveVideoRef = useRef<HTMLVideoElement | null>(null)
+  const videoFileInputRef = useRef<HTMLInputElement>(null)
 
-      if (res.error) {
-        if (/Could not find the table/i.test(res.error.message)) {
-          setError('Business Bank is not configured yet. Run Supabase migration `2025122205_business_bank.sql` and refresh schema cache.')
-        } else {
-          setError(res.error.message)
-        }
-        setItems([])
-        return
-      }
-      const rows = (res.data || []) as any[]
-      setItems(rows as any)
+  const [editEntry, setEditEntry] = useState<null | { item: BusinessBankItem; draft: any }>(null)
 
-      // Prefetch thumbnails for first few items
-      for (const it of rows.slice(0, 12)) {
-        const path = it.file_path
-        if (!path) continue
-        if (it.item_type === 'image' || it.item_type === 'video') {
-          ensureThumb(path).catch(() => {})
-        }
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      if (cancelled) return
-      await reload()
-    })()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    loadItems()
+  }, [filter])
 
-  const grouped = useMemo(() => {
-    const images = items.filter((i) => i.item_type === 'image')
-    const videos = items.filter((i) => i.item_type === 'video')
-    const docs = items.filter((i) => i.item_type === 'document')
-    return { images, videos, docs }
-  }, [items])
-
-  async function uploadFiles(files: FileList | null, forceKind?: 'image' | 'video' | 'document') {
-    setError(null)
-    if (!files || files.length === 0) return
-    if (!businessId) {
-      setError('Missing business id. Refresh and try again.')
-      return
-    }
-    setBusy(true)
+  async function loadItems() {
     try {
+      setIsLoading(true)
       const { data: sessionRes } = await supabase.auth.getSession()
-      const uid = sessionRes.session?.user?.id ?? null
+      const uid = sessionRes.session?.user?.id
+
       if (!uid) {
-        setError('Please sign in.')
+        router.replace('/login?redirect=/dashboard/business/bank')
         return
       }
 
+      setUserId(uid)
+
+      let query = supabase
+        .from('business_bank_items')
+        .select('*')
+        .eq('user_id', uid)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+
+      if (filter !== 'all') {
+        query = query.eq('item_type', filter)
+      }
+
+      const { data, error } = await query
+
+      if (error) throw error
+
+      setItems(data || [])
+
+      // Load thumbnails for images and videos (including business_introduction)
+      const mediaItems = (data || []).filter(
+        (item) => item.item_type === 'image' || item.item_type === 'video' || item.item_type === 'business_introduction'
+      )
+      const thumbMap: Record<string, string> = {}
+      for (const item of mediaItems) {
+        if (item.file_path) {
+          const { data: urlData } = await supabase.storage
+            .from(BUCKET)
+            .createSignedUrl(item.file_path, 3600)
+          if (urlData) {
+            thumbMap[String(item.id)] = urlData.signedUrl
+          }
+        } else if (item.file_url) {
+          thumbMap[String(item.id)] = item.file_url
+        }
+      }
+      setThumbUrls(thumbMap)
+    } catch (err: any) {
+      console.error('Error loading items:', err)
+      setUploadError(err.message || 'Failed to load items')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function handleFileUpload(files: FileList | null) {
+    if (!files || files.length === 0 || !userId) return
+
+    setIsUploading(true)
+    setUploadError(null)
+
+    try {
       for (const file of Array.from(files)) {
         if (file.size > MAX_UPLOAD_BYTES) {
-          setError(`File too large: ${file.name}. Max size is ${Math.round(MAX_UPLOAD_BYTES / (1024 * 1024))}MB.`)
-          return
+          setUploadError(`File ${file.name} exceeds maximum size of 50MB`)
+          continue
         }
-        const kind = forceKind ?? inferKind(file)
-        const path = `business/${businessId}/${Date.now()}-${safeFileName(file.name)}`
 
-        const up = await supabase.storage.from(BUCKET).upload(path, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type || undefined,
-        })
+        const fileExt = file.name.split('.').pop()
+        // Path structure: business/{user_id}/{filename}
+        // Using user_id directly as business identifier (matches business_profiles.user_id)
+        const fileName = `business/${userId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`
+        const filePath = fileName
 
-        if (up.error) {
-          const msg = up.error.message || 'Upload failed.'
-          if (/bucket/i.test(msg) && /not found/i.test(msg)) {
-            setError('Business Bank bucket is missing. Run Supabase migration `2025122205_business_bank.sql` and refresh schema cache.')
-            return
+        // Determine item type
+        let itemType = 'image'
+        if (file.type.startsWith('video/')) {
+          itemType = 'video'
+        } else if (file.type === 'image/svg+xml' || file.name.toLowerCase().includes('logo')) {
+          itemType = 'logo'
+        }
+
+        // Upload to Supabase Storage
+        const { error: uploadError, data: uploadData } = await supabase.storage
+          .from(BUCKET)
+          .upload(filePath, file, {
+            cacheControl: '3600',
+            upsert: false,
+          })
+
+        if (uploadError) {
+          console.error('Storage upload error details:', {
+            message: uploadError.message,
+            statusCode: uploadError.statusCode,
+            error: uploadError,
+            filePath: filePath,
+            userId: userId,
+          })
+          // If it's an RLS error, provide helpful message
+          if (uploadError.message?.includes('row-level security') || uploadError.message?.includes('policy') || uploadError.statusCode === 403) {
+            throw new Error('Storage upload failed: RLS policy error. Please run FIX_STORAGE_RLS_BUSINESS_BANK.sql in Supabase SQL Editor.')
           }
-          setError(msg)
-          return
+          throw new Error(uploadError.message || `Storage upload failed: ${uploadError.statusCode || 'Unknown error'}`)
         }
 
-        const ins = await supabase.from('business_bank_items').insert({
-          business_id: businessId,
-          user_id: uid,
-          item_type: kind,
-          title: file.name,
-          description: null,
-          file_path: path,
-          file_type: file.type || null,
-          file_size: file.size,
-          metadata: {},
-        } as any)
+        // Get public URL (or signed URL if bucket is private)
+        let fileUrl: string | null = null
+        if (uploadData?.path) {
+          // Try to get public URL first (works if bucket is public)
+          const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(uploadData.path)
+          if (publicUrlData?.publicUrl) {
+            fileUrl = publicUrlData.publicUrl
+          } else {
+            // For private buckets, use the path directly (Supabase will handle auth)
+            // Or create a signed URL if needed for immediate access
+            try {
+              const { data: urlData, error: signError } = await supabase.storage
+                .from(BUCKET)
+                .createSignedUrl(uploadData.path, 31536000) // 1 year
+              if (signError) {
+                console.warn('Could not create signed URL, using path:', signError)
+                // Use path-based URL that will be resolved by Supabase client
+                fileUrl = `${BUCKET}/${uploadData.path}`
+              } else {
+                fileUrl = urlData?.signedUrl || null
+              }
+            } catch (signErr) {
+              console.warn('Signed URL creation failed, using path:', signErr)
+              fileUrl = `${BUCKET}/${uploadData.path}`
+            }
+          }
+        }
 
-        if (ins.error) {
-          setError(ins.error.message)
-          return
+        // Create database record
+        const { error: dbError, data: dbData } = await supabase.from('business_bank_items').insert({
+          user_id: userId,
+          item_type: itemType,
+          title: file.name,
+          file_path: filePath,
+          file_url: fileUrl,
+          file_type: file.type,
+          file_size: file.size,
+          metadata: {
+            originalName: file.name,
+          },
+        }).select()
+
+        if (dbError) {
+          console.error('Database insert error details:', {
+            message: dbError.message,
+            details: dbError.details,
+            hint: dbError.hint,
+            code: dbError.code,
+          })
+          // If DB insert fails, try to clean up the uploaded file
+          if (uploadData?.path) {
+            try {
+              await supabase.storage.from(BUCKET).remove([uploadData.path])
+            } catch (cleanupErr) {
+              console.error('Failed to cleanup uploaded file:', cleanupErr)
+            }
+          }
+          throw new Error(dbError.message || dbError.details || 'Failed to save file record to database')
         }
       }
 
-      await reload()
+      await loadItems()
+      setUploadError(null) // Clear any previous errors on success
+    } catch (err: any) {
+      console.error('Upload error details:', {
+        message: err.message,
+        error: err,
+        stack: err.stack,
+      })
+      setUploadError(err.message || err.details || 'Upload failed. Check console for details.')
     } finally {
-      setBusy(false)
+      setIsUploading(false)
     }
   }
 
-  async function onDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault()
-    e.stopPropagation()
-    await uploadFiles(e.dataTransfer.files)
-  }
+  async function handleTextBlockCreate() {
+    if (!textTitle.trim() || !userId) {
+      setUploadError('Title is required')
+      return
+    }
 
-  async function openItem(it: BankItem) {
-    if (!it.file_path) return
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(it.file_path, 60 * 30)
-    if (error || !data?.signedUrl) return
-
-    if (it.item_type === 'image') setPreview({ kind: 'image', url: data.signedUrl, title: it.title })
-    else if (it.item_type === 'video') setPreview({ kind: 'video', url: data.signedUrl, title: it.title })
-    else window.open(data.signedUrl, '_blank')
-  }
-
-  async function removeItem(it: BankItem) {
-    if (!confirm(`Remove "${it.title}" from Business Bank?`)) return
-    setBusy(true)
-    setError(null)
     try {
-      if (it.file_path) {
-        await supabase.storage.from(BUCKET).remove([it.file_path]).catch(() => {})
+      const { error } = await supabase.from('business_bank_items').insert({
+        user_id: userId,
+        item_type: 'text',
+        title: textTitle,
+        description: textContent || null,
+        metadata: {
+          content: textContent || '',
+        },
+      })
+
+      if (error) {
+        console.error('Database error:', error)
+        throw error
       }
-      const del = await supabase.from('business_bank_items').delete().eq('id', it.id)
-      if (del.error) {
-        setError(del.error.message)
+
+      // Reset form immediately after successful creation
+      setTextTitle('')
+      setTextContent('')
+      setUploadError(null)
+      await loadItems()
+    } catch (err: any) {
+      console.error('Error creating text block:', err)
+      setUploadError(err.message || err.details || 'Failed to create text block')
+    }
+  }
+
+  async function handleLinkCreate() {
+    if (!linkTitle.trim() || !linkUrl.trim() || !userId) {
+      setUploadError('Title and URL are required')
+      return
+    }
+
+    try {
+      const { error } = await supabase.from('business_bank_items').insert({
+        user_id: userId,
+        item_type: 'link',
+        title: linkTitle,
+        description: linkDescription || null,
+        file_url: linkUrl,
+        metadata: {
+          url: linkUrl,
+        },
+      })
+
+      if (error) {
+        console.error('Database error:', error)
+        throw error
+      }
+
+      // Reset form immediately after successful creation
+      setLinkTitle('')
+      setLinkUrl('')
+      setLinkDescription('')
+      setUploadError(null)
+      await loadItems()
+    } catch (err: any) {
+      console.error('Error creating link:', err)
+      setUploadError(err.message || err.details || 'Failed to create link')
+    }
+  }
+
+  // Video recording functions
+  function chooseRecorderMime() {
+    const candidates = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+      'video/mp4',
+    ]
+    for (const c of candidates) {
+      if (typeof MediaRecorder !== 'undefined' && (MediaRecorder as any).isTypeSupported?.(c)) return c
+    }
+    return 'video/webm'
+  }
+
+  async function startCamera() {
+    setRecErr(null)
+    setRecBusy(true)
+    try {
+      if (typeof window !== 'undefined' && !(window as any).isSecureContext) {
+        setRecErr('Camera access requires a secure connection (HTTPS) or localhost.')
         return
       }
-      await reload()
+
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        setRecErr('Camera recording is not supported in this browser.')
+        return
+      }
+
+      let stream: MediaStream | null = null
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      } catch (e: any) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      }
+      setRecStream(stream)
+      const mime = chooseRecorderMime()
+      setRecMime(mime)
+    } catch (e: any) {
+      const name = e?.name ?? null
+      const msg =
+        name === 'NotAllowedError'
+          ? 'Permission denied. Please allow camera + microphone access for this site.'
+          : (e?.message ?? 'Failed to access camera/microphone.')
+      setRecErr(msg)
     } finally {
-      setBusy(false)
+      setRecBusy(false)
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white">
-      {preview ? (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-6"
-          onClick={() => setPreview(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-5xl bg-white rounded-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div className="font-semibold truncate pr-4 text-slate-900">{preview.title}</div>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm text-slate-900"
-                onClick={() => setPreview(null)}
-              >
-                Close
-              </button>
-            </div>
-            <div className="p-4 bg-black flex items-center justify-center">
-              {preview.kind === 'image' ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={preview.url} alt={preview.title} className="max-h-[75vh] w-auto object-contain" />
-              ) : (
-                <video src={preview.url} controls className="max-h-[75vh] w-auto object-contain" />
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+  async function beginRecording() {
+    setRecErr(null)
+    if (!recStream) {
+      await startCamera()
+      return
+    }
+    try {
+      if (typeof MediaRecorder === 'undefined') {
+        setRecErr('Video recording is not supported in this browser.')
+        return
+      }
+      if (recPreviewUrl) {
+        try { URL.revokeObjectURL(recPreviewUrl) } catch {}
+        setRecPreviewUrl(null)
+      }
+      setRecChunks([])
+      recChunksRef.current = []
 
+      const preferred = chooseRecorderMime()
+      const candidates = Array.from(new Set([preferred, 'video/webm;codecs=vp8,opus', 'video/webm']))
+
+      let chosen: string | null = null
+      let mr: MediaRecorder | null = null
+
+      const attachHandlers = (rec: MediaRecorder, mimeForBlob: string) => {
+        rec.ondataavailable = (ev) => {
+          if (ev.data && ev.data.size > 0) {
+            recChunksRef.current = [...recChunksRef.current, ev.data]
+            setRecChunks(recChunksRef.current)
+          }
+        }
+        rec.onstop = () => {
+          const blob = new Blob(recChunksRef.current, { type: mimeForBlob })
+          if (recPreviewUrl) {
+            try { URL.revokeObjectURL(recPreviewUrl) } catch {}
+          }
+          const url = URL.createObjectURL(blob)
+          setRecPreviewUrl(url)
+        }
+      }
+
+      for (const c of candidates) {
+        try {
+          const rec = new MediaRecorder(recStream, { mimeType: c } as any)
+          attachHandlers(rec, c)
+          rec.start(250)
+          mr = rec
+          chosen = c
+          break
+        } catch (e: any) {
+          // Try next codec
+        }
+      }
+
+      if (!mr) {
+        try {
+          const rec = new MediaRecorder(recStream)
+          const fallbackMime = (rec as any)?.mimeType || 'video/webm'
+          attachHandlers(rec, fallbackMime)
+          rec.start(250)
+          mr = rec
+          chosen = fallbackMime
+        } catch (e: any) {
+          try {
+            const videoOnly = new MediaStream(recStream.getVideoTracks())
+            const rec2 = new MediaRecorder(videoOnly)
+            const fallbackMime2 = (rec2 as any)?.mimeType || 'video/webm'
+            attachHandlers(rec2, fallbackMime2)
+            rec2.start(250)
+            mr = rec2
+            chosen = fallbackMime2
+          } catch (e2: any) {
+            setRecErr('Recording is not supported by this browser/device.')
+            return
+          }
+        }
+      }
+
+      setRecMime(chosen || preferred)
+      setRecorder(mr)
+      setIsRecording(true)
+    } catch (e: any) {
+      setRecErr(e?.message ?? 'Failed to start recording.')
+    }
+  }
+
+  async function stopRecording() {
+    try { recorder?.stop() } catch {}
+    setIsRecording(false)
+    setRecorder(null)
+  }
+
+  function clearRecording() {
+    try {
+      if (recStream) recStream.getTracks().forEach((t) => t.stop())
+      if (recPreviewUrl) URL.revokeObjectURL(recPreviewUrl)
+    } catch {}
+    setRecStream(null)
+    setRecPreviewUrl(null)
+    setRecChunks([])
+    recChunksRef.current = []
+  }
+
+  async function uploadRecordedVideo() {
+    setRecErr(null)
+    if (!userId) {
+      setUploadError('Please sign in to upload video.')
+      return
+    }
+
+    const blob = new Blob(recChunksRef.current, { type: recMime })
+    if (!blob.size) {
+      setRecErr('No recording captured yet.')
+      return
+    }
+    if (blob.size > MAX_UPLOAD_BYTES) {
+      const sizeMb = Math.round((blob.size / (1024 * 1024)) * 10) / 10
+      const limitMb = Math.round((MAX_UPLOAD_BYTES / (1024 * 1024)) * 10) / 10
+      setRecErr(`Recording is ${sizeMb}MB, which exceeds the upload limit (~${limitMb}MB). Please record a shorter video.`)
+      return
+    }
+
+    const ext = recMime.includes('mp4') ? 'mp4' : 'webm'
+    const file = new File([blob], `business-intro-${Date.now()}.${ext}`, { type: recMime })
+
+    setIsUploading(true)
+    try {
+      const fileExt = ext
+      const fileName = `business/${userId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`
+      const filePath = fileName
+
+      const { error: uploadError, data: uploadData } = await supabase.storage
+        .from(BUCKET)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw new Error(uploadError.message || 'Storage upload failed')
+      }
+
+      let fileUrl: string | null = null
+      if (uploadData?.path) {
+        const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(uploadData.path)
+        if (publicUrlData?.publicUrl) {
+          fileUrl = publicUrlData.publicUrl
+        } else {
+          try {
+            const { data: urlData } = await supabase.storage
+              .from(BUCKET)
+              .createSignedUrl(uploadData.path, 31536000)
+            fileUrl = urlData?.signedUrl || null
+          } catch {
+            fileUrl = `${BUCKET}/${uploadData.path}`
+          }
+        }
+      }
+
+      console.log('[Business Bank] Inserting recorded video:', {
+        user_id: userId,
+        item_type: 'business_introduction',
+        title: introVideoTitle || 'Business Introduction Video',
+        file_path: filePath,
+        file_url: fileUrl,
+        file_type: file.type,
+        file_size: file.size,
+      })
+
+      const { error: dbError, data: dbData } = await supabase
+        .from('business_bank_items')
+        .insert({
+          user_id: userId,
+          item_type: 'business_introduction',
+          title: introVideoTitle || 'Business Introduction Video',
+          file_path: filePath,
+          file_url: fileUrl,
+          file_type: file.type,
+          file_size: file.size,
+          metadata: {
+            originalName: file.name,
+            source: 'recording',
+          },
+        })
+        .select()
+
+      if (dbError) {
+        console.error('[Business Bank] Database error:', {
+          message: dbError.message,
+          details: dbError.details,
+          hint: dbError.hint,
+          code: dbError.code,
+        })
+        
+        if (uploadData?.path) {
+          await supabase.storage.from(BUCKET).remove([uploadData.path])
+        }
+        
+        // Check for constraint violation
+        if (dbError.message?.includes('check constraint') || dbError.message?.includes('business_bank_items_item_type_check')) {
+          throw new Error(
+            'The item type "business_introduction" is not allowed. Please run FIX_BUSINESS_BANK_ITEM_TYPE_CONSTRAINT.sql in Supabase SQL Editor to enable this type.'
+          )
+        } else {
+          throw new Error(dbError.message || dbError.details || 'Failed to save video record')
+        }
+      }
+
+      console.log('[Business Bank] Recorded video inserted successfully:', dbData)
+
+      console.log('[Business Bank] Recorded video inserted successfully')
+
+      clearRecording()
+      setRecOpen(false)
+      setIntroVideoTitle('Business Introduction Video')
+      setUploadError(null)
+      await loadItems()
+      
+      // Show success message
+      alert('Video recorded and saved successfully!')
+    } catch (err: any) {
+      setRecErr(err.message || 'Failed to upload video')
+      setUploadError(err.message || 'Failed to upload video')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  async function handleIntroVideoUpload(files: FileList | null) {
+    if (!files || files.length === 0 || !userId) return
+
+    const file = files[0]
+    if (!file.type.startsWith('video/')) {
+      setUploadError('Please select a video file.')
+      return
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const sizeMb = Math.round((file.size / (1024 * 1024)) * 10) / 10
+      const limitMb = Math.round((MAX_UPLOAD_BYTES / (1024 * 1024)) * 10) / 10
+      setUploadError(`File is ${sizeMb}MB, which exceeds the upload limit (~${limitMb}MB).`)
+      return
+    }
+
+    setIsUploading(true)
+    setUploadError(null)
+
+    try {
+      const fileExt = file.name.split('.').pop()
+      const fileName = `business/${userId}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${fileExt}`
+      const filePath = fileName
+
+      const { error: uploadError, data: uploadData } = await supabase.storage
+        .from(BUCKET)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw new Error(uploadError.message || 'Storage upload failed')
+      }
+
+      let fileUrl: string | null = null
+      if (uploadData?.path) {
+        const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(uploadData.path)
+        if (publicUrlData?.publicUrl) {
+          fileUrl = publicUrlData.publicUrl
+        } else {
+          try {
+            const { data: urlData } = await supabase.storage
+              .from(BUCKET)
+              .createSignedUrl(uploadData.path, 31536000)
+            fileUrl = urlData?.signedUrl || null
+          } catch {
+            fileUrl = `${BUCKET}/${uploadData.path}`
+          }
+        }
+      }
+
+      console.log('[Business Bank] Inserting video file:', {
+        user_id: userId,
+        item_type: 'business_introduction',
+        title: introVideoTitle || 'Business Introduction Video',
+        file_path: filePath,
+        file_url: fileUrl,
+        file_type: file.type,
+        file_size: file.size,
+      })
+
+      const { error: dbError, data: dbData } = await supabase
+        .from('business_bank_items')
+        .insert({
+          user_id: userId,
+          item_type: 'business_introduction',
+          title: introVideoTitle || 'Business Introduction Video',
+          file_path: filePath,
+          file_url: fileUrl,
+          file_type: file.type,
+          file_size: file.size,
+          metadata: {
+            originalName: file.name,
+            source: 'upload',
+          },
+        })
+        .select()
+
+      if (dbError) {
+        console.error('[Business Bank] Database error:', {
+          message: dbError.message,
+          details: dbError.details,
+          hint: dbError.hint,
+          code: dbError.code,
+        })
+        
+        if (uploadData?.path) {
+          await supabase.storage.from(BUCKET).remove([uploadData.path])
+        }
+        
+        // Check for constraint violation
+        if (dbError.message?.includes('check constraint') || dbError.message?.includes('business_bank_items_item_type_check')) {
+          throw new Error(
+            'The item type "business_introduction" is not allowed. Please run FIX_BUSINESS_BANK_ITEM_TYPE_CONSTRAINT.sql in Supabase SQL Editor to enable this type.'
+          )
+        } else {
+          throw new Error(dbError.message || dbError.details || 'Failed to save video record')
+        }
+      }
+
+      console.log('[Business Bank] Video file inserted successfully:', dbData)
+
+      setIntroVideoTitle('Business Introduction Video')
+      setUploadError(null)
+      await loadItems()
+      
+      // Show success message
+      alert('Video uploaded successfully!')
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to upload video')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  async function handleIntroVideoLink() {
+    if (!introVideoUrl.trim() || !userId) {
+      setUploadError('Please enter a video URL')
+      return
+    }
+
+    setIsUploading(true)
+    setUploadError(null)
+
+    try {
+      // Validate URL
+      try {
+        new URL(introVideoUrl)
+      } catch {
+        setUploadError('Please enter a valid URL')
+        setIsUploading(false)
+        return
+      }
+
+      console.log('[Business Bank] Inserting video link:', {
+        user_id: userId,
+        item_type: 'business_introduction',
+        title: introVideoTitle || 'Business Introduction Video',
+        file_url: introVideoUrl,
+      })
+
+      const { error, data } = await supabase
+        .from('business_bank_items')
+        .insert({
+          user_id: userId,
+          item_type: 'business_introduction',
+          title: introVideoTitle || 'Business Introduction Video',
+          file_url: introVideoUrl,
+          metadata: {
+            url: introVideoUrl,
+            source: 'link',
+          },
+        })
+        .select()
+
+      if (error) {
+        console.error('[Business Bank] Database error:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        })
+        
+        // Check for constraint violation
+        if (error.message?.includes('check constraint') || error.message?.includes('business_bank_items_item_type_check')) {
+          setUploadError(
+            'The item type "business_introduction" is not allowed. Please run FIX_BUSINESS_BANK_ITEM_TYPE_CONSTRAINT.sql in Supabase SQL Editor to enable this type.'
+          )
+        } else {
+          setUploadError(error.message || error.details || 'Failed to create video link')
+        }
+        setIsUploading(false)
+        return
+      }
+
+      console.log('[Business Bank] Video link inserted successfully:', data)
+
+      setIntroVideoUrl('')
+      setIntroVideoTitle('Business Introduction Video')
+      setUploadError(null)
+      await loadItems()
+      
+      // Show success message
+      alert('Video link added successfully!')
+    } catch (err: any) {
+      console.error('[Business Bank] Error creating video link:', err)
+      setUploadError(err.message || err.details || 'Failed to create video link')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  async function handleDelete(id: number) {
+    if (!confirm('Are you sure you want to delete this item?')) return
+
+    try {
+      const item = items.find((i) => i.id === id)
+      if (item?.file_path) {
+        await supabase.storage.from(BUCKET).remove([item.file_path])
+      }
+
+      const { error } = await supabase
+        .from('business_bank_items')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      await loadItems()
+    } catch (err: any) {
+      console.error('Error deleting item:', err)
+      setUploadError(err.message || 'Failed to delete item')
+    }
+  }
+
+  function handleDrag(e: DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true)
+    } else if (e.type === 'dragleave') {
+      setDragActive(false)
+    }
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragActive(false)
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e.dataTransfer.files)
+    }
+  }
+
+  const filteredItems = items.filter((item) => filter === 'all' || item.item_type === filter)
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
       <header className="container mx-auto px-6 py-4 flex items-center justify-between border-b border-gray-800">
-        <Link href="/dashboard/business" className="flex items-center space-x-2">
+        <Link href="/" className="flex items-center space-x-2">
           <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-xl">C</span>
           </div>
@@ -271,269 +852,558 @@ export default function BusinessBankPage() {
         </Link>
         <div className="flex items-center gap-3">
           <Link
-            href="/dashboard/business/edit"
-            className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            Edit Business Profile
-          </Link>
-          <Link
             href="/dashboard/business"
             className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
           >
             Back to Dashboard
           </Link>
+          <Link
+            href="/dashboard/business/edit"
+            className="px-6 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors"
+          >
+            Edit Profile
+          </Link>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-10 max-w-6xl">
-        <div className="flex items-start justify-between gap-6 mb-6">
-          <div>
-            <h1 className="text-3xl font-bold">Business Bank</h1>
-            <p className="text-gray-400 mt-2">
-              Upload and store documents, images, and video for reuse across your Business Profile.
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => allInputRef.current?.click()}
-                className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-semibold disabled:opacity-60"
-              >
-                Upload files
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => reload()}
-                className="px-4 py-2 rounded-lg border border-gray-600 text-gray-200 hover:bg-gray-800 disabled:opacity-60"
-              >
-                Refresh
-              </button>
-            </div>
-            <input
-              ref={allInputRef}
-              type="file"
-              multiple
-              disabled={busy}
-              accept="image/*,video/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt"
-              onChange={(e) => uploadFiles(e.target.files)}
-              className="hidden"
-            />
-            <input
-              ref={imgInputRef}
-              type="file"
-              multiple
-              disabled={busy}
-              accept="image/*"
-              onChange={(e) => uploadFiles(e.target.files, 'image')}
-              className="hidden"
-            />
-            <input
-              ref={vidInputRef}
-              type="file"
-              multiple
-              disabled={busy}
-              accept="video/*"
-              onChange={(e) => uploadFiles(e.target.files, 'video')}
-              className="hidden"
-            />
-            <input
-              ref={docInputRef}
-              type="file"
-              multiple
-              disabled={busy}
-              accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt"
-              onChange={(e) => uploadFiles(e.target.files, 'document')}
-              className="hidden"
-            />
-            {busy ? <div className="text-xs text-gray-400 mt-2">Working…</div> : null}
-          </div>
+      <div className="container mx-auto px-6 py-8 max-w-7xl">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">Business Bank</h1>
+          <p className="text-gray-400">
+            Store images, videos, text blocks, and links for your business profile
+          </p>
         </div>
 
-        {error ? (
-          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 text-red-200 p-4">{error}</div>
-        ) : null}
-
-        <div
-          className="mb-6 rounded-2xl border border-white/10 bg-slate-950/35 p-6 text-slate-200"
-          onDragOver={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onDrop={onDrop}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <div className="font-semibold">Drag & drop files here</div>
-              <div className="text-sm text-slate-400 mt-1">No URL required — you can upload directly from your computer.</div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => imgInputRef.current?.click()}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 disabled:opacity-60"
-              >
-                + Add images
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => vidInputRef.current?.click()}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 disabled:opacity-60"
-              >
-                + Add videos
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => docInputRef.current?.click()}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 disabled:opacity-60"
-              >
-                + Add documents
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : (
-          <div className="grid lg:grid-cols-3 gap-6">
-            <section className="rounded-2xl border border-white/10 bg-slate-950/35 p-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-semibold">Images</h2>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => imgInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-sm hover:bg-white/10 disabled:opacity-60"
-                >
-                  + Add
-                </button>
-              </div>
-              {grouped.images.length === 0 ? (
-                <div className="text-gray-400">No images yet.</div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  {grouped.images.slice(0, 12).map((it) => {
-                    const path = it.file_path || ''
-                    const url = path ? thumbUrls[path] : null
-                    return (
-                      <div
-                        key={it.id}
-                        onClick={() => openItem(it)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openItem(it)
-                        }}
-                        tabIndex={0}
-                        role="button"
-                        className="rounded-xl border border-white/10 bg-slate-900/40 overflow-hidden text-left"
-                        title="Click to preview"
-                      >
-                        {url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={url} alt={it.title} className="w-full h-28 object-cover" />
-                        ) : (
-                          <div className="w-full h-28 flex items-center justify-center text-gray-500">IMG</div>
-                        )}
-                        <div className="p-3">
-                          <div className="text-sm text-gray-200 truncate">{it.title}</div>
-                          <div className="mt-2 flex items-center justify-between">
-                            <span className="text-xs text-gray-500">Image</span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                removeItem(it)
-                              }}
-                              className="text-xs text-red-300 hover:text-red-200"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-2xl border border-white/10 bg-slate-950/35 p-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-semibold">Videos</h2>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => vidInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-sm hover:bg-white/10 disabled:opacity-60"
-                >
-                  + Add
-                </button>
-              </div>
-              {grouped.videos.length === 0 ? (
-                <div className="text-gray-400">No videos yet.</div>
-              ) : (
-                <div className="space-y-3">
-                  {grouped.videos.slice(0, 10).map((it) => (
-                    <div key={it.id} className="rounded-xl border border-white/10 bg-slate-900/40 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <button type="button" className="text-left" onClick={() => openItem(it)}>
-                          <div className="text-gray-200 font-medium">{it.title}</div>
-                          <div className="text-xs text-gray-500 mt-1">{it.file_type || 'video'}</div>
-                        </button>
-                        <button type="button" onClick={() => removeItem(it)} className="text-xs text-red-300 hover:text-red-200">
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-2xl border border-white/10 bg-slate-950/35 p-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-semibold">Documents</h2>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => docInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-sm hover:bg-white/10 disabled:opacity-60"
-                >
-                  + Add
-                </button>
-              </div>
-              {grouped.docs.length === 0 ? (
-                <div className="text-gray-400">No documents yet.</div>
-              ) : (
-                <div className="space-y-2">
-                  {grouped.docs.slice(0, 16).map((it) => (
-                    <div key={it.id} className="rounded-xl border border-white/10 bg-slate-900/40 px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <button type="button" onClick={() => openItem(it)} className="text-left min-w-0">
-                          <div className="text-gray-200 font-medium truncate">{it.title}</div>
-                          <div className="text-xs text-gray-500 mt-1 truncate">{it.file_type || 'document'}</div>
-                        </button>
-                        <button type="button" onClick={() => removeItem(it)} className="text-xs text-red-300 hover:text-red-200">
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+        {uploadError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 text-red-200 rounded-lg">
+            {uploadError}
+            <button
+              onClick={() => setUploadError(null)}
+              className="ml-4 text-red-300 hover:text-red-100"
+            >
+              ×
+            </button>
           </div>
         )}
-      </main>
+
+        {/* Filter Tabs */}
+        <div className="mb-6 flex gap-2 border-b border-gray-700">
+          {(['all', 'image', 'video', 'text', 'link', 'logo', 'business_introduction'] as ItemFilter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-2 font-medium transition-colors ${
+                filter === f
+                  ? 'text-blue-400 border-b-2 border-blue-400'
+                  : 'text-gray-400 hover:text-gray-300'
+              }`}
+            >
+              {f === 'business_introduction' ? 'Business Introduction' : f.charAt(0).toUpperCase() + f.slice(1)}
+              {f !== 'all' && (
+                <span className="ml-2 text-sm text-gray-500">
+                  ({items.filter((i) => i.item_type === f).length})
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Upload Area */}
+        <div
+          ref={dropRef}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          className={`mb-8 p-8 border-2 border-dashed rounded-lg transition-colors ${
+            dragActive
+              ? 'border-blue-500 bg-blue-500/10'
+              : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
+          }`}
+        >
+          <div className="text-center">
+            <p className="text-gray-300 mb-4">Drag and drop files here, or click to browse</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,video/*"
+              onChange={(e) => handleFileUpload(e.target.files)}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="px-6 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50"
+            >
+              {isUploading ? 'Uploading...' : 'Upload Files'}
+            </button>
+          </div>
+        </div>
+
+        {/* Add Text Block */}
+        <div className="mb-8 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
+          <h3 className="text-lg font-semibold text-white mb-4">Add Text Block</h3>
+          <div className="space-y-4">
+            <input
+              type="text"
+              placeholder="Title"
+              value={textTitle}
+              onChange={(e) => setTextTitle(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+            />
+            <textarea
+              placeholder="Content"
+              value={textContent}
+              onChange={(e) => setTextContent(e.target.value)}
+              rows={4}
+              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+            />
+            <button
+              onClick={handleTextBlockCreate}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Create Text Block
+            </button>
+          </div>
+        </div>
+
+        {/* Business Introduction Video */}
+        <div className="mb-8 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
+          <h3 className="text-lg font-semibold text-white mb-4">Business Introduction Video</h3>
+          <p className="text-sm text-gray-400 mb-4">
+            Record a video, upload a file, or link to a video from YouTube, your website, or other platforms.
+          </p>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Title</label>
+              <input
+                type="text"
+                placeholder="Business Introduction Video"
+                value={introVideoTitle}
+                onChange={(e) => setIntroVideoTitle(e.target.value)}
+                className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">Source</label>
+              <div className="flex gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setIntroVideoSource('link')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    introVideoSource === 'link'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Link Video
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIntroVideoSource('upload')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    introVideoSource === 'upload'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Upload File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIntroVideoSource('record')
+                    setRecOpen(true)
+                  }}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    introVideoSource === 'record'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Record Video
+                </button>
+              </div>
+            </div>
+
+            {introVideoSource === 'link' && (
+              <div className="space-y-4">
+                <input
+                  type="url"
+                  placeholder="Video URL (YouTube, Vimeo, or direct video link)"
+                  value={introVideoUrl}
+                  onChange={(e) => setIntroVideoUrl(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+                />
+                <button
+                  onClick={handleIntroVideoLink}
+                  disabled={isUploading}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+                >
+                  {isUploading ? 'Saving...' : 'Add Video Link'}
+                </button>
+              </div>
+            )}
+
+            {introVideoSource === 'upload' && (
+              <div className="space-y-4">
+                <input
+                  ref={videoFileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={(e) => handleIntroVideoUpload(e.target.files)}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => videoFileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+                >
+                  {isUploading ? 'Uploading...' : 'Choose Video File'}
+                </button>
+              </div>
+            )}
+
+            {introVideoSource === 'record' && (
+              <div className="space-y-4">
+                <button
+                  onClick={() => setRecOpen(true)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  Open Camera
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Add Link */}
+        <div className="mb-8 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
+          <h3 className="text-lg font-semibold text-white mb-4">Add Link</h3>
+          <div className="space-y-4">
+            <input
+              type="text"
+              placeholder="Title (e.g., Company Website)"
+              value={linkTitle}
+              onChange={(e) => setLinkTitle(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+            />
+            <input
+              type="url"
+              placeholder="URL"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+            />
+            <textarea
+              placeholder="Description (optional)"
+              value={linkDescription}
+              onChange={(e) => setLinkDescription(e.target.value)}
+              rows={2}
+              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+            />
+            <button
+              onClick={handleLinkCreate}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Add Link
+            </button>
+          </div>
+        </div>
+
+        {/* Items Grid */}
+        {isLoading ? (
+          <div className="text-center py-12">
+            <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">
+            <p>No items found. Upload files or create text blocks to get started.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredItems.map((item) => (
+              <div
+                key={item.id}
+                className="bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden hover:border-gray-600 transition-colors"
+              >
+                {(item.item_type === 'image' || item.item_type === 'logo') && thumbUrls[item.id] && (
+                  <div
+                    className="aspect-video bg-gray-900 cursor-pointer"
+                    onClick={() =>
+                      setPreview({
+                        kind: 'image',
+                        url: thumbUrls[item.id],
+                        title: item.title,
+                      })
+                    }
+                  >
+                    <img
+                      src={thumbUrls[item.id]}
+                      alt={item.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                {(item.item_type === 'video' || item.item_type === 'business_introduction') && thumbUrls[item.id] && (
+                  <div
+                    className="aspect-video bg-gray-900 cursor-pointer relative"
+                    onClick={() =>
+                      setPreview({
+                        kind: 'video',
+                        url: thumbUrls[item.id],
+                        title: item.title,
+                      })
+                    }
+                  >
+                    <img
+                      src={thumbUrls[item.id]}
+                      alt={item.title}
+                      className="w-full h-full object-cover opacity-75"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-16 h-16 bg-black/50 rounded-full flex items-center justify-center">
+                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(item.item_type === 'video' || item.item_type === 'business_introduction') && !thumbUrls[item.id] && item.file_url && (
+                  <div
+                    className="aspect-video bg-gray-900 cursor-pointer relative"
+                    onClick={() =>
+                      setPreview({
+                        kind: 'video',
+                        url: item.file_url!,
+                        title: item.title,
+                      })
+                    }
+                  >
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="w-16 h-16 bg-black/50 rounded-full flex items-center justify-center">
+                        <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(item.item_type === 'text' || item.item_type === 'link') && (
+                  <div className="aspect-video bg-gray-900 flex items-center justify-center p-4">
+                    <div className="text-center">
+                      {item.item_type === 'link' ? (
+                        <svg
+                          className="w-12 h-12 text-gray-600 mx-auto mb-2"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                          />
+                        </svg>
+                      ) : (
+                        <svg
+                          className="w-12 h-12 text-gray-600 mx-auto mb-2"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                          />
+                        </svg>
+                      )}
+                      <p className="text-xs text-gray-500 uppercase">{item.item_type}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="p-4">
+                  <h3 className="text-white font-semibold mb-1 truncate">{item.title}</h3>
+                  {item.description && (
+                    <p className="text-sm text-gray-400 line-clamp-2">{item.description}</p>
+                  )}
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="flex-1 px-3 py-1.5 text-sm bg-red-500/20 text-red-300 rounded hover:bg-red-500/30 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Preview Modal */}
+      {preview && (
+        <div
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+          onClick={() => setPreview(null)}
+        >
+          <div className="max-w-4xl w-full">
+            <button
+              onClick={() => setPreview(null)}
+              className="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl"
+            >
+              ×
+            </button>
+            {preview.kind === 'image' ? (
+              <img src={preview.url} alt={preview.title} className="w-full h-auto rounded-lg" />
+            ) : (
+              <video
+                src={preview.url}
+                controls
+                className="w-full h-auto rounded-lg"
+                autoPlay
+              />
+            )}
+            <p className="text-white text-center mt-4">{preview.title}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Video Recording Modal */}
+      {recOpen && (
+        <div
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            if (!isRecording) {
+              clearRecording()
+              setRecOpen(false)
+            }
+          }}
+        >
+          <div
+            className="max-w-3xl w-full bg-gray-900 rounded-lg border border-gray-700 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-white">Record Business Introduction Video</h3>
+              <button
+                onClick={() => {
+                  if (!isRecording) {
+                    clearRecording()
+                    setRecOpen(false)
+                  }
+                }}
+                disabled={isRecording}
+                className="text-gray-400 hover:text-white text-2xl disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+
+            {recErr && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 text-red-200 rounded-lg text-sm">
+                {recErr}
+              </div>
+            )}
+
+            {!recStream && !recPreviewUrl && (
+              <div className="space-y-4">
+                <p className="text-gray-300">
+                  Click "Start Camera" to begin recording your business introduction video.
+                </p>
+                <button
+                  onClick={startCamera}
+                  disabled={recBusy}
+                  className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 font-semibold"
+                >
+                  {recBusy ? 'Starting Camera...' : 'Start Camera'}
+                </button>
+              </div>
+            )}
+
+            {recStream && !recPreviewUrl && (
+              <div className="space-y-4">
+                <div className="relative bg-black rounded-lg overflow-hidden">
+                  <video
+                    ref={liveVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full max-h-[400px] object-contain"
+                  />
+                  {isRecording && (
+                    <div className="absolute top-4 left-4 flex items-center gap-2 bg-red-500/80 px-3 py-1 rounded-full">
+                      <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                      <span className="text-white text-sm font-medium">Recording</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3 justify-center">
+                  {!isRecording ? (
+                    <button
+                      onClick={beginRecording}
+                      className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold"
+                    >
+                      Start Recording
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopRecording}
+                      className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold"
+                    >
+                      Stop Recording
+                    </button>
+                  )}
+                  <button
+                    onClick={clearRecording}
+                    disabled={isRecording}
+                    className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {recPreviewUrl && (
+              <div className="space-y-4">
+                <div className="relative bg-black rounded-lg overflow-hidden">
+                  <video
+                    src={recPreviewUrl}
+                    controls
+                    className="w-full max-h-[400px] object-contain"
+                  />
+                </div>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={uploadRecordedVideo}
+                    disabled={isUploading}
+                    className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 font-semibold"
+                  >
+                    {isUploading ? 'Uploading...' : 'Save Video'}
+                  </button>
+                  <button
+                    onClick={clearRecording}
+                    disabled={isUploading}
+                    className="px-6 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
+                  >
+                    Record Again
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
-

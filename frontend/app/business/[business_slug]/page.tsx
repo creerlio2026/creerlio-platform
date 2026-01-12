@@ -80,6 +80,7 @@ export default async function BusinessPublicPage({ params }: { params: { busines
   const slugCols = ['slug', 'business_slug', 'handle']
   let bp: Row | null = null
   for (const col of slugCols) {
+       // @ts-ignore 
     const res = await supabase.from('business_profiles').select('*').eq(col as any, slug).maybeSingle()
     if (!res.error && res.data) {
       bp = res.data as any

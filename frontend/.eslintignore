@@ -1,2 +1,5 @@
-next.config.js
-
+node_modules
+.next
+dist
+build
+*.config.js

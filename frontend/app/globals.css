@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/preflight" layer(base);
+@import "tailwindcss/utilities" layer(utilities);
 
 :root {
   --foreground-rgb: 255, 255, 255;
@@ -131,4 +133,111 @@ select[class*="bg-slate-50"],
 select[class*="bg-zinc-50"] {
   color: #000000 !important;
   -webkit-text-fill-color: #000000 !important;
+}
+
+/* Business Profile Builder Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.8s ease-out;
+}
+
+.animate-slide-up-delay {
+  animation: slide-up 0.8s ease-out 0.2s both;
+}
+
+/* PeopleSelect Hero Animations */
+@keyframes slide-in-left {
+  0%, 100% {
+    transform: translateX(-20px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(0px);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-right {
+  0%, 100% {
+    transform: translateX(20px);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(0px);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-line {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scaleX(0.8);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes align-center {
+  0%, 90%, 100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  40%, 50% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 6s ease-in-out infinite;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 6s ease-in-out infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s ease-in-out infinite;
+}
+
+.animate-pulse-line {
+  animation: pulse-line 4s ease-in-out infinite;
+}
+
+.animate-align-center {
+  animation: align-center 6s ease-in-out infinite;
 }

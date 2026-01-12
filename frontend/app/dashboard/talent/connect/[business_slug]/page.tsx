@@ -2,8 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { ensureTalentProfile } from '@/lib/ensureProfile'
 
 const SECTION_CHOICES = [
   { key: 'intro', label: 'Introduction' },
@@ -13,6 +14,7 @@ const SECTION_CHOICES = [
   { key: 'education', label: 'Education' },
   { key: 'projects', label: 'Projects' },
   { key: 'attachments', label: 'Attachments' },
+  { key: 'family_community', label: 'Family and Community' },
   { key: 'location_preferences', label: 'Location & commute preferences' },
 ] as const
 
@@ -21,7 +23,9 @@ type Step = 'select' | 'review' | 'confirm'
 
 export default function TalentConnectPage({ params }: { params: { business_slug: string } }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const slug = params?.business_slug
+  const editRequestId = searchParams?.get('edit') // Request ID if editing existing request
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -30,6 +34,7 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [talentId, setTalentId] = useState<string | null>(null)
   const [previewProfile, setPreviewProfile] = useState<any>(null)
+  const [isEditMode, setIsEditMode] = useState(false)
   const [selected, setSelected] = useState<Record<SectionKey, boolean>>({
     intro: true,
     bio: true,
@@ -38,6 +43,7 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
     education: true,
     projects: true,
     attachments: false,
+    family_community: false,
     location_preferences: false,
   })
   const selectedList = useMemo(
@@ -75,46 +81,140 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
         const bizRes = await supabase.from('business_profiles').select('id').eq('user_id', uid).maybeSingle()
         const hasBusiness = !bizRes.error && !!bizRes.data?.id
 
-        const talentRes = await supabase.from('talent_profiles').select('id').eq('user_id', uid).single()
-        if (talentRes.error || !talentRes.data?.id) {
-          setError('A Talent profile is required before you can connect.')
-          return
-        }
+        // Check for Talent Portfolio (not Profile) - Portfolio is what gets shared with businesses
+        // Allow connections even without a portfolio - they can share what they have
+        const portfolioRes = await supabase
+          .from('talent_bank_items')
+          .select('id, metadata')
+          .eq('user_id', uid)
+          .eq('item_type', 'portfolio')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        
+        // Portfolio is optional - if it doesn't exist, we'll just show an empty preview
+        // This allows talents to connect even if they haven't built their portfolio yet
         // If user is mixed-profile but currently in business context, guide them to switch.
         if (hasBusiness && activeRole === 'business') {
           setError('You are currently in Business mode. Switch to Talent mode (open Talent Dashboard) to send a connection request.')
           return
         }
-        const tId = String(talentRes.data.id)
-        if (!cancelled) setTalentId(tId)
+        
+        // Get the talent_profiles.id (not user_id) - this is what talent_connection_requests.talent_id references
+        // Use ensureTalentProfile to create profile if it doesn't exist (allows connections even with incomplete profiles)
+        try {
+          const talentProfile = await ensureTalentProfile(uid)
+          const tId = String(talentProfile.id) // Use talent_profiles.id, not user_id
+          if (!cancelled) setTalentId(tId)
+        } catch (profileError: any) {
+          console.error('[Talent Connect] Error ensuring talent profile:', profileError)
+          setError(`Could not access talent profile: ${profileError.message || 'Unknown error'}. Please try again or contact support.`)
+          return
+        }
 
-        // Load current talent profile for preview/review. Keep it schema-tolerant and defensive.
-        const profileRes = await supabase.from('talent_profiles').select('*').eq('id', tId).maybeSingle()
-        if (!cancelled) setPreviewProfile(profileRes.error ? null : (profileRes.data as any))
+        // Load current talent portfolio for preview/review. Portfolio data is what gets shared.
+        // If no portfolio exists, use empty object - allows connections even without a portfolio
+        const portfolioData = portfolioRes.data?.metadata || {}
+        if (!cancelled) setPreviewProfile(portfolioData as any)
 
-        const pageRes = await supabase
-          .from('business_profile_pages')
-          .select('business_id, name, business_name, company_name, legal_name, display_name, slug')
+        // Query business_profiles table using slug column
+        // Handle both database slugs and generated slugs (business-{id})
+        let businessData: any = null
+        let businessError: any = null
+        
+        // First try exact slug match
+        const slugRes = await supabase
+          .from('business_profiles')
+          .select('id, business_name, description')
           .eq('slug', slug)
           .maybeSingle()
+        
+        if (!slugRes.error && slugRes.data) {
+          businessData = slugRes.data
+        } else {
+          // If slug is in format "business-{id}", extract ID and query by ID
+          if (slug.startsWith('business-')) {
+            const extractedId = slug.replace('business-', '')
+            const idRes = await supabase
+              .from('business_profiles')
+              .select('id, business_name, description')
+              .eq('id', extractedId)
+              .maybeSingle()
+            
+            if (!idRes.error && idRes.data) {
+              businessData = idRes.data
+            } else {
+              businessError = idRes.error
+            }
+          } else {
+            // Try querying by ID directly (in case slug is actually an ID)
+            const idRes = await supabase
+              .from('business_profiles')
+              .select('id, business_name, description')
+              .eq('id', slug)
+              .maybeSingle()
+            
+            if (!idRes.error && idRes.data) {
+              businessData = idRes.data
+            } else {
+              businessError = idRes.error || slugRes.error
+            }
+          }
+        }
 
-        if (pageRes.error || !pageRes.data?.business_id) {
+        let row: any = null
+        if (businessData) {
+          row = {
+            business_id: businessData.id,
+            business_name: businessData.business_name
+          }
+        }
+
+        if (!row || !row.business_id) {
           setError('Business profile not found.')
           return
         }
 
-        const row: any = pageRes.data
-        const nm =
-          (typeof row.name === 'string' && row.name) ||
-          (typeof row.business_name === 'string' && row.business_name) ||
-          (typeof row.company_name === 'string' && row.company_name) ||
-          (typeof row.legal_name === 'string' && row.legal_name) ||
-          (typeof row.display_name === 'string' && row.display_name) ||
-          'Business'
+        const nm = row.business_name || 'Business'
 
         if (!cancelled) {
           setBusinessId(String(row.business_id))
           setBusinessName(nm)
+        }
+
+        // If editing an existing request, load its selected sections
+        // Do this after tId is set (which happens above)
+        if (editRequestId && tId && !cancelled) {
+          setIsEditMode(true)
+          const existingReqRes = await supabase
+            .from('talent_connection_requests')
+            .select('selected_sections')
+            .eq('id', editRequestId)
+            .eq('talent_id', tId)
+            .maybeSingle()
+          
+          if (!existingReqRes.error && existingReqRes.data?.selected_sections) {
+            const existingSections = Array.isArray(existingReqRes.data.selected_sections) 
+              ? existingReqRes.data.selected_sections 
+              : []
+            
+            // Pre-populate selected sections
+            const newSelected: Record<SectionKey, boolean> = {
+              intro: existingSections.includes('intro'),
+              bio: existingSections.includes('bio'),
+              skills: existingSections.includes('skills'),
+              experience: existingSections.includes('experience'),
+              education: existingSections.includes('education'),
+              projects: existingSections.includes('projects'),
+              attachments: existingSections.includes('attachments'),
+              family_community: existingSections.includes('family_community'),
+              location_preferences: existingSections.includes('location_preferences'),
+            }
+            
+            if (!cancelled) {
+              setSelected(newSelected)
+            }
+          }
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -124,7 +224,7 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
     return () => {
       cancelled = true
     }
-  }, [slug])
+  }, [slug, editRequestId])
 
   function goReview() {
     setError(null)
@@ -151,19 +251,34 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
     if (!talentId || !businessId) return
     try {
       // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'talent/connect/[business_slug]/page.tsx:submit',message:'Submitting connection request',data:{slug,sections:selectedList.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CONNECT2'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'talent/connect/[business_slug]/page.tsx:submit',message:isEditMode ? 'Updating connection request' : 'Submitting connection request',data:{slug,sections:selectedList.length,editMode:isEditMode,requestId:editRequestId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CONNECT2'})}).catch(()=>{});
       // #endregion
 
-      const ins = await supabase
-        .from('talent_connection_requests')
-        .insert({ talent_id: talentId, business_id: businessId, status: 'pending', selected_sections: selectedList })
-      if (ins.error) {
-        setError(ins.error.message)
-        return
+      if (isEditMode && editRequestId) {
+        // Update existing request
+        const upd = await supabase
+          .from('talent_connection_requests')
+          .update({ selected_sections: selectedList })
+          .eq('id', editRequestId)
+          .eq('talent_id', talentId)
+        
+        if (upd.error) {
+          setError(upd.error.message)
+          return
+        }
+      } else {
+        // Create new request
+        const ins = await supabase
+          .from('talent_connection_requests')
+          .insert({ talent_id: talentId, business_id: businessId, status: 'pending', selected_sections: selectedList })
+        if (ins.error) {
+          setError(ins.error.message)
+          return
+        }
       }
       router.push('/dashboard/talent?tab=connections')
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to submit connection request.')
+      setError(e?.message ?? `Failed to ${isEditMode ? 'update' : 'submit'} connection request.`)
     }
   }
 
@@ -176,7 +291,7 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
         (typeof p.talent_name === 'string' && p.talent_name) ||
         (typeof p.full_name === 'string' && p.full_name) ||
         (typeof p.display_name === 'string' && p.display_name) ||
-        'Your profile'
+        'Your portfolio'
       return (
         <div className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
           <div className="text-white font-semibold">{name}</div>
@@ -215,13 +330,29 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
         </div>
       )
     }
+    if (k === 'family_community') {
+      const familyCommunity = (p.family_community && typeof p.family_community === 'object') ? p.family_community : {}
+      const imageIds = Array.isArray(familyCommunity.imageIds) ? familyCommunity.imageIds : []
+      return (
+        <div className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
+          <div className="text-white font-semibold mb-2">Family and Community</div>
+          {imageIds.length > 0 ? (
+            <div className="text-gray-300 text-sm">
+              {imageIds.length} {imageIds.length === 1 ? 'image' : 'images'} in Family and Community section.
+            </div>
+          ) : (
+            <div className="text-gray-500">No Family and Community images yet.</div>
+          )}
+        </div>
+      )
+    }
 
     // For other sections, show a clear placeholder (schema varies a lot across environments)
     return (
       <div className="rounded-xl border border-gray-800 bg-slate-900/40 p-4">
         <div className="text-white font-semibold mb-1">{SECTION_CHOICES.find((s) => s.key === k)?.label}</div>
         <div className="text-gray-500 text-sm">
-          Preview for this section will reflect what’s currently stored in your profile.
+          Preview for this section will reflect what's currently stored in your portfolio.
         </div>
       </div>
     )
@@ -292,27 +423,93 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
               </>
             ) : step === 'review' ? (
               <>
-                <h2 className="text-xl font-bold text-white">2) Review exactly what the business will see</h2>
-                <p className="text-gray-400 text-sm">
-                  This preview updates based on what’s currently in your profile. You can go back to change selections.
+                <h2 className="text-xl font-bold text-white">2) Choose what to share with {businessName}</h2>
+                <p className="text-gray-400 text-sm mb-4">
+                  Select the sections you want to share. Uncheck any sections you'd like to keep private. The preview below shows what the business will see.
                 </p>
-                <div className="space-y-3">
-                  {selectedList.map((k) => (
-                    <SectionPreview key={k} k={k as SectionKey} />
-                  ))}
+                <div className="mb-4 p-4 rounded-xl border border-blue-500/30 bg-blue-500/10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white font-semibold mb-1">View Your Full Portfolio</p>
+                      <p className="text-gray-300 text-sm">
+                        See exactly how your portfolio appears to businesses, including all sections, images, and media.
+                      </p>
+                    </div>
+                    <a
+                      href="/portfolio/view"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-4 px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-semibold whitespace-nowrap transition-colors"
+                    >
+                      View Full Portfolio →
+                    </a>
+                  </div>
                 </div>
+                
+                {/* Interactive section selection with previews */}
+                <div className="space-y-4">
+                  {SECTION_CHOICES.map((section) => {
+                    const isSelected = selected[section.key]
+                    return (
+                      <div
+                        key={section.key}
+                        className={`rounded-xl border p-4 transition-all ${
+                          isSelected
+                            ? 'border-blue-500/50 bg-slate-900/60'
+                            : 'border-gray-800 bg-slate-900/20 opacity-60'
+                        }`}
+                      >
+                        <label className="flex items-start gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              setSelected((p) => ({ ...p, [section.key]: e.target.checked }))
+                            }}
+                            className="mt-1 h-5 w-5 flex-shrink-0"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-white font-semibold">{section.label}</h3>
+                              {isSelected && (
+                                <span className="text-xs px-2 py-1 rounded bg-blue-500/20 text-blue-300">
+                                  Will be shared
+                                </span>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <div className="mt-2">
+                                <SectionPreview k={section.key as SectionKey} />
+                              </div>
+                            )}
+                            {!isSelected && (
+                              <p className="text-gray-500 text-sm mt-1">This section will not be shared with {businessName}.</p>
+                            )}
+                          </div>
+                        </label>
+                      </div>
+                    )
+                  })}
+                </div>
+                
                 <div className="pt-4 border-t border-gray-800 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={goBack}
-                    className="px-4 py-2 rounded-lg border border-gray-700 text-gray-200 hover:bg-white/5"
-                  >
-                    Back
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={goBack}
+                      className="px-4 py-2 rounded-lg border border-gray-700 text-gray-200 hover:bg-white/5"
+                    >
+                      Back
+                    </button>
+                    <p className="text-sm text-gray-400">
+                      {selectedList.length} {selectedList.length === 1 ? 'section' : 'sections'} selected
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={goConfirm}
-                    className="px-5 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-semibold"
+                    disabled={selectedList.length === 0}
+                    className="px-5 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     Continue to confirmation
                   </button>
@@ -320,10 +517,19 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
               </>
             ) : (
               <>
-                <h2 className="text-xl font-bold text-white">3) Confirm & send request</h2>
+                <h2 className="text-xl font-bold text-white">3) {isEditMode ? 'Confirm & update request' : 'Confirm & send request'}</h2>
                 <div className="rounded-xl border border-white/10 bg-slate-900/40 p-4 text-gray-200">
-                  You’re about to send a connection request to <span className="font-semibold text-white">{businessName}</span> with{' '}
-                  <span className="font-semibold text-white">{selectedList.length}</span> shared sections.
+                  {isEditMode ? (
+                    <>
+                      You're about to update your connection request to <span className="font-semibold text-white">{businessName}</span> with{' '}
+                      <span className="font-semibold text-white">{selectedList.length}</span> shared sections.
+                    </>
+                  ) : (
+                    <>
+                      You're about to send a connection request to <span className="font-semibold text-white">{businessName}</span> with{' '}
+                      <span className="font-semibold text-white">{selectedList.length}</span> shared sections.
+                    </>
+                  )}
                 </div>
                 <div className="pt-4 border-t border-gray-800 flex items-center justify-between">
                   <button
@@ -338,7 +544,7 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
                     onClick={submit}
                     className="px-5 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-semibold"
                   >
-                    Send connection request
+                    {isEditMode ? 'Update Request' : 'Send connection request'}
                   </button>
                 </div>
               </>

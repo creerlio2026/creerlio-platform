@@ -59,12 +59,57 @@ class AIService:
             structured_data["file_size"] = len(file_content)
             
             return structured_data
+    
+    async def polish_text(self, text: str) -> str:
+        """
+        Polish and format text using AI to improve grammar, spelling, and style.
+        
+        Args:
+            text: The text to polish
+            
+        Returns:
+            Polished text with improved grammar, spelling, and formatting
+        """
+        if not text or not text.strip():
+            return text
+        
+        try:
+            system_prompt = """You are a professional writing assistant. Your task is to polish and improve the provided text.
+
+Requirements:
+1. Fix all spelling and grammar mistakes
+2. Improve sentence structure and flow
+3. Make the text sound more professional and polished
+4. Maintain the original meaning and tone
+5. Keep the same level of formality
+6. Preserve paragraph breaks and structure
+7. Do not add new information not present in the original text
+8. If the text is already well-written, make only minor improvements
+
+Return only the polished text without any explanations or additional commentary."""
+            
+            user_prompt = f"""Please polish the following text, fixing grammar, spelling, and making it sound more professional:
+
+{text}"""
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000
+            )
+            
+            polished_text = response.choices[0].message.content.strip()
+            return polished_text
             
         except Exception as e:
             import traceback
-            print(f"[AI_SERVICE] ERROR: {str(e)}")
+            print(f"[AI_SERVICE] Error polishing text: {str(e)}")
             print(f"[AI_SERVICE] Traceback: {traceback.format_exc()}")
-            raise Exception(f"Error parsing resume: {str(e)}")
+            raise Exception(f"Error polishing text: {str(e)}")
     
     def _extract_text(self, file_content: bytes, filename: str) -> str:
         """Extract text from various file formats"""
@@ -298,6 +343,100 @@ IMPORTANT: Make sure you extract EVERY work experience entry. Look carefully thr
             print(f"[AI_SERVICE] Error in AI parsing: {str(e)}")
             print(f"[AI_SERVICE] Traceback: {traceback.format_exc()}")
             raise Exception(f"Error in AI parsing: {str(e)}")
+    
+    async def summarize_conversation(self, transcription_text: str, conversation_context: Optional[Dict] = None) -> Dict:
+        """
+        Summarize a video conversation transcription using AI
+        
+        Args:
+            transcription_text: The full transcription text from the video recording
+            conversation_context: Optional context like participant names, meeting topic, etc.
+            
+        Returns:
+            Dictionary with summary, key points, action items, and sentiment
+        """
+        try:
+            if not transcription_text or not transcription_text.strip():
+                raise ValueError("Transcription text is required for summarization")
+            
+            print(f"[AI_SERVICE] Summarizing conversation ({len(transcription_text)} characters)...")
+            
+            # Build system prompt for conversation summarization
+            system_prompt = """You are an expert at summarizing professional conversations and video calls. 
+Your task is to analyze a conversation transcription and provide:
+1. A concise summary of the main discussion points
+2. Key points or highlights from the conversation
+3. Action items or next steps mentioned
+4. Overall sentiment of the conversation
+
+Return a JSON object with the following structure:
+{
+    "summary": "A 2-3 paragraph summary of the main discussion",
+    "key_points": ["Point 1", "Point 2", "Point 3"],
+    "action_items": ["Action item 1", "Action item 2"],
+    "sentiment": "positive" | "neutral" | "negative",
+    "topics": ["Topic 1", "Topic 2", "Topic 3"]
+}
+
+Be professional, accurate, and focus on actionable insights."""
+            
+            # Build user prompt with context
+            context_info = ""
+            if conversation_context:
+                if conversation_context.get('talent_name'):
+                    context_info += f"\nTalent participant: {conversation_context['talent_name']}"
+                if conversation_context.get('business_name'):
+                    context_info += f"\nBusiness participant: {conversation_context['business_name']}"
+                if conversation_context.get('topic'):
+                    context_info += f"\nMeeting topic: {conversation_context['topic']}"
+            
+            user_prompt = f"""Please summarize the following conversation transcription.{context_info}
+
+Transcription:
+{transcription_text}
+
+Provide a comprehensive summary in JSON format."""
+            
+            print(f"[AI_SERVICE] Calling OpenAI API for conversation summary...")
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,  # Lower temperature for more consistent summaries
+                response_format={"type": "json_object"}
+            )
+            
+            response_content = response.choices[0].message.content
+            print(f"[AI_SERVICE] OpenAI API response received ({len(response_content)} characters)")
+            
+            # Parse JSON response
+            summary_data = json.loads(response_content)
+            
+            # Validate and structure response
+            result = {
+                "summary": summary_data.get("summary", ""),
+                "key_points": summary_data.get("key_points", []),
+                "action_items": summary_data.get("action_items", []),
+                "sentiment": summary_data.get("sentiment", "neutral"),
+                "topics": summary_data.get("topics", []),
+                "ai_model_used": self.model
+            }
+            
+            print(f"[AI_SERVICE] Summary generated: {len(result['summary'])} chars, {len(result['key_points'])} key points, {len(result['action_items'])} action items")
+            
+            return result
+            
+        except json.JSONDecodeError as e:
+            print(f"[AI_SERVICE] JSON decode error in summarization: {str(e)}")
+            print(f"[AI_SERVICE] Response content: {response_content[:1000] if 'response_content' in locals() else 'N/A'}")
+            raise Exception(f"Error parsing AI summary response: {str(e)}")
+        except Exception as e:
+            import traceback
+            print(f"[AI_SERVICE] Error in conversation summarization: {str(e)}")
+            print(f"[AI_SERVICE] Traceback: {traceback.format_exc()}")
+            raise Exception(f"Error summarizing conversation: {str(e)}")
     
     async def enhance_resume_data(self, resume_data: Dict) -> Dict:
         """Enhance resume data with AI insights and suggestions"""

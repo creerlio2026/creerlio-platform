@@ -49,7 +49,8 @@ from app.auth import (
     create_user, authenticate_user, create_access_token,
     get_user_by_email, ACCESS_TOKEN_EXPIRE_MINUTES
 )
-from datetime import timedelta
+from datetime import timedelta, datetime
+import uuid
 
 load_dotenv()
 
@@ -657,6 +658,33 @@ async def list_resumes(skip: int = 0, limit: int = 100, db=Depends(get_db)):
     """List all parsed resumes"""
     resumes = db.query(ResumeData).offset(skip).limit(limit).all()
     return {"resumes": resumes, "count": len(resumes)}
+
+
+# ==================== AI Text Polishing ====================
+
+@app.post("/api/ai/polish-text")
+async def polish_text(request: Request):
+    """Polish and format text using AI to improve grammar, spelling, and style"""
+    if not ai_service:
+        raise HTTPException(status_code=503, detail="AI service is not available")
+    
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+        
+        if not text or not isinstance(text, str):
+            raise HTTPException(status_code=400, detail="Text is required and must be a string")
+        
+        polished_text = await ai_service.polish_text(text)
+        
+        return {
+            "success": True,
+            "polished_text": polished_text
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Business Profiles ====================
@@ -2296,4 +2324,398 @@ async def delete_user_admin(user_id: str, request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+
+# ==================== Video Chat System ====================
+
+@app.post("/api/video-chat/initiate")
+async def initiate_video_chat(
+    connection_request_id: str = Query(..., description="Connection request ID"),
+    initiated_by: str = Query(..., description="'talent' or 'business'"),
+    email: str = Query(..., description="User email address"),
+    recording_enabled: bool = Query(False, description="Enable recording")
+):
+    """Initiate a video chat session between connected talent and business"""
+    try:
+        supabase = get_supabase()
+        
+        # Get user info
+        user = get_user_by_email(None, email)  # db not needed for this check
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_id = str(user.id) if hasattr(user, 'id') else email
+        
+        # Verify connection request exists and is accepted
+        conn_res = supabase.table('talent_connection_requests').select('*').eq('id', connection_request_id).eq('status', 'accepted').single().execute()
+        
+        if not conn_res.data:
+            raise HTTPException(status_code=404, detail="Connection request not found or not accepted")
+        
+        conn_data = conn_res.data
+        talent_id = conn_data['talent_id']
+        business_id = conn_data['business_id']
+        
+        # Verify user has permission (must be part of this connection)
+        talent_check = supabase.table('talent_profiles').select('user_id').eq('id', talent_id).single().execute()
+        business_check = supabase.table('business_profiles').select('user_id').eq('id', business_id).single().execute()
+        
+        talent_user_id = talent_check.data.get('user_id') if talent_check.data else None
+        business_user_id = business_check.data.get('user_id') if business_check.data else None
+        
+        # For now, we'll use email as user_id check (adjust based on your auth system)
+        if initiated_by == 'talent' and talent_user_id != user_id:
+            raise HTTPException(status_code=403, detail="You don't have permission to initiate this video chat")
+        if initiated_by == 'business' and business_user_id != user_id:
+            raise HTTPException(status_code=403, detail="You don't have permission to initiate this video chat")
+        
+        # Generate room ID and token (for now, simple UUID - replace with Agora/Twilio token generation)
+        room_id = str(uuid.uuid4())
+        room_token = str(uuid.uuid4())  # Replace with actual WebRTC service token
+        
+        # Create video chat session
+        session_data = {
+            'talent_id': talent_id,
+            'business_id': business_id,
+            'connection_request_id': connection_request_id,
+            'status': 'pending',
+            'initiated_by': initiated_by,
+            'initiated_by_user_id': user_id,
+            'recording_enabled': recording_enabled,
+            'room_id': room_id,
+            'room_token': room_token,
+            'started_at': None,
+            'ended_at': None
+        }
+        
+        session_res = supabase.table('video_chat_sessions').insert(session_data).select().single().execute()
+        
+        if session_res.error:
+            raise HTTPException(status_code=500, detail=f"Failed to create video chat session: {session_res.error}")
+        
+        return {
+            "success": True,
+            "session_id": session_res.data['id'],
+            "room_id": room_id,
+            "room_token": room_token,
+            "session": session_res.data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to initiate video chat: {str(e)}")
+
+
+@app.post("/api/video-chat/{session_id}/start")
+async def start_video_chat_session(
+    session_id: str,
+    email: str = Query(..., description="User email address")
+):
+    """Start an active video chat session"""
+    try:
+        supabase = get_supabase()
+        
+        # Get session
+        session_res = supabase.table('video_chat_sessions').select('*').eq('id', session_id).single().execute()
+        
+        if not session_res.data:
+            raise HTTPException(status_code=404, detail="Video chat session not found")
+        
+        session = session_res.data
+        
+        # Update session to active
+        update_res = supabase.table('video_chat_sessions').update({
+            'status': 'active',
+            'started_at': datetime.utcnow().isoformat()
+        }).eq('id', session_id).select().single().execute()
+        
+        if update_res.error:
+            raise HTTPException(status_code=500, detail=f"Failed to start session: {update_res.error}")
+        
+        return {
+            "success": True,
+            "session": update_res.data,
+            "room_id": session['room_id'],
+            "room_token": session['room_token']
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start video chat: {str(e)}")
+
+
+@app.post("/api/video-chat/{session_id}/end")
+async def end_video_chat_session(
+    session_id: str,
+    email: str = Query(..., description="User email address"),
+    duration_seconds: Optional[int] = Query(None, description="Call duration in seconds")
+):
+    """End a video chat session"""
+    try:
+        supabase = get_supabase()
+        
+        # Get session
+        session_res = supabase.table('video_chat_sessions').select('*').eq('id', session_id).single().execute()
+        
+        if not session_res.data:
+            raise HTTPException(status_code=404, detail="Video chat session not found")
+        
+        session = session_res.data
+        
+        # Calculate duration if not provided
+        if duration_seconds is None and session.get('started_at'):
+            started = datetime.fromisoformat(session['started_at'].replace('Z', '+00:00'))
+            duration_seconds = int((datetime.utcnow() - started.replace(tzinfo=None)).total_seconds())
+        
+        # Update session to ended
+        update_data = {
+            'status': 'ended',
+            'ended_at': datetime.utcnow().isoformat(),
+            'duration_seconds': duration_seconds or 0
+        }
+        
+        update_res = supabase.table('video_chat_sessions').update(update_data).eq('id', session_id).select().single().execute()
+        
+        if update_res.error:
+            raise HTTPException(status_code=500, detail=f"Failed to end session: {update_res.error}")
+        
+        return {
+            "success": True,
+            "session": update_res.data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to end video chat: {str(e)}")
+
+
+@app.post("/api/video-chat/{session_id}/recording/start")
+async def start_recording(
+    session_id: str,
+    email: str = Query(..., description="User email address")
+):
+    """Start recording a video chat session"""
+    try:
+        supabase = get_supabase()
+        
+        # Verify session exists and is active
+        session_res = supabase.table('video_chat_sessions').select('*').eq('id', session_id).eq('status', 'active').single().execute()
+        
+        if not session_res.data:
+            raise HTTPException(status_code=404, detail="Active video chat session not found")
+        
+        session = session_res.data
+        
+        if not session.get('recording_enabled'):
+            raise HTTPException(status_code=400, detail="Recording is not enabled for this session")
+        
+        # Update session with recording started
+        update_res = supabase.table('video_chat_sessions').update({
+            'recording_started_at': datetime.utcnow().isoformat()
+        }).eq('id', session_id).select().single().execute()
+        
+        return {
+            "success": True,
+            "session": update_res.data,
+            "message": "Recording started"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start recording: {str(e)}")
+
+
+@app.post("/api/video-chat/{session_id}/recording/stop")
+async def stop_recording(
+    session_id: str,
+    storage_path: str = Query(..., description="Path to recording in storage"),
+    transcription_text: Optional[str] = Query(None, description="Transcription text if available"),
+    email: str = Query(..., description="User email address")
+):
+    """Stop recording and save recording metadata"""
+    try:
+        supabase = get_supabase()
+        
+        # Verify session exists
+        session_res = supabase.table('video_chat_sessions').select('*').eq('id', session_id).single().execute()
+        
+        if not session_res.data:
+            raise HTTPException(status_code=404, detail="Video chat session not found")
+        
+        session = session_res.data
+        
+        # Create recording record
+        recording_data = {
+            'session_id': session_id,
+            'recording_type': 'full',
+            'storage_path': storage_path,
+            'transcription_text': transcription_text,
+            'processing_status': 'pending' if transcription_text else 'processing'
+        }
+        
+        recording_res = supabase.table('video_recordings').insert(recording_data).select().single().execute()
+        
+        if recording_res.error:
+            raise HTTPException(status_code=500, detail=f"Failed to save recording: {recording_res.error}")
+        
+        # If transcription is available, generate summary automatically
+        summary_id = None
+        if transcription_text and ai_service:
+            try:
+                # Get context for summarization
+                talent_id = session['talent_id']
+                business_id = session['business_id']
+                
+                talent_res = supabase.table('talent_profiles').select('name').eq('id', talent_id).single().execute()
+                business_res = supabase.table('business_profiles').select('business_name, name').eq('id', business_id).single().execute()
+                
+                context = {
+                    'talent_name': talent_res.data.get('name') if talent_res.data else None,
+                    'business_name': business_res.data.get('business_name') or business_res.data.get('name') if business_res.data else None
+                }
+                
+                # Generate summary
+                summary_result = await ai_service.summarize_conversation(transcription_text, context)
+                
+                # Save summary
+                summary_data = {
+                    'session_id': session_id,
+                    'recording_id': recording_res.data['id'],
+                    'summary_type': 'ai_generated',
+                    'summary_text': summary_result['summary'],
+                    'key_points': summary_result['key_points'],
+                    'action_items': summary_result['action_items'],
+                    'sentiment': summary_result['sentiment'],
+                    'ai_model_used': summary_result.get('ai_model_used', 'gpt-4-turbo-preview'),
+                    'processing_status': 'completed'
+                }
+                
+                summary_res = supabase.table('conversation_summaries').insert(summary_data).select().single().execute()
+                summary_id = summary_res.data['id'] if summary_res.data else None
+                
+            except Exception as summary_error:
+                print(f"[VIDEO_CHAT] Error generating summary: {str(summary_error)}")
+                # Continue without summary - it can be generated later
+        
+        return {
+            "success": True,
+            "recording": recording_res.data,
+            "summary_id": summary_id,
+            "message": "Recording stopped and saved"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to stop recording: {str(e)}")
+
+
+@app.get("/api/video-chat/{session_id}/summary")
+async def get_conversation_summary(
+    session_id: str,
+    email: str = Query(..., description="User email address")
+):
+    """Get conversation summary for a video chat session"""
+    try:
+        supabase = get_supabase()
+        
+        # Get summary
+        summary_res = supabase.table('conversation_summaries').select('*').eq('session_id', session_id).order('created_at', desc=True).limit(1).single().execute()
+        
+        if not summary_res.data:
+            raise HTTPException(status_code=404, detail="Conversation summary not found")
+        
+        return {
+            "success": True,
+            "summary": summary_res.data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get summary: {str(e)}")
+
+
+@app.post("/api/video-chat/{session_id}/generate-summary")
+async def generate_conversation_summary(
+    session_id: str,
+    email: str = Query(..., description="User email address")
+):
+    """Generate AI summary for a video chat session (requires recording with transcription)"""
+    try:
+        if not ai_service:
+            raise HTTPException(status_code=503, detail="AI service is not available")
+        
+        supabase = get_supabase()
+        
+        # Get session and recording
+        session_res = supabase.table('video_chat_sessions').select('*').eq('id', session_id).single().execute()
+        
+        if not session_res.data:
+            raise HTTPException(status_code=404, detail="Video chat session not found")
+        
+        session = session_res.data
+        
+        # Get recording with transcription
+        recording_res = supabase.table('video_recordings').select('*').eq('session_id', session_id).eq('processing_status', 'completed').order('created_at', desc=True).limit(1).single().execute()
+        
+        if not recording_res.data or not recording_res.data.get('transcription_text'):
+            raise HTTPException(status_code=404, detail="Recording with transcription not found")
+        
+        recording = recording_res.data
+        transcription_text = recording['transcription_text']
+        
+        # Get context for summarization
+        talent_id = session['talent_id']
+        business_id = session['business_id']
+        
+        talent_res = supabase.table('talent_profiles').select('name').eq('id', talent_id).single().execute()
+        business_res = supabase.table('business_profiles').select('business_name, name').eq('id', business_id).single().execute()
+        
+        context = {
+            'talent_name': talent_res.data.get('name') if talent_res.data else None,
+            'business_name': business_res.data.get('business_name') or business_res.data.get('name') if business_res.data else None
+        }
+        
+        # Generate summary
+        summary_result = await ai_service.summarize_conversation(transcription_text, context)
+        
+        # Save summary
+        summary_data = {
+            'session_id': session_id,
+            'recording_id': recording['id'],
+            'summary_type': 'ai_generated',
+            'summary_text': summary_result['summary'],
+            'key_points': summary_result['key_points'],
+            'action_items': summary_result['action_items'],
+            'sentiment': summary_result['sentiment'],
+            'ai_model_used': summary_result.get('ai_model_used', 'gpt-4-turbo-preview'),
+            'processing_status': 'completed',
+            'processed_at': datetime.utcnow().isoformat()
+        }
+        
+        summary_res = supabase.table('conversation_summaries').insert(summary_data).select().single().execute()
+        
+        if summary_res.error:
+            raise HTTPException(status_code=500, detail=f"Failed to save summary: {summary_res.error}")
+        
+        return {
+            "success": True,
+            "summary": summary_res.data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
