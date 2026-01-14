@@ -59,6 +59,12 @@ class AIService:
             structured_data["file_size"] = len(file_content)
             
             return structured_data
+            
+        except Exception as e:
+            import traceback
+            print(f"[AI_SERVICE] Error parsing resume: {str(e)}")
+            print(f"[AI_SERVICE] Traceback: {traceback.format_exc()}")
+            raise Exception(f"Error parsing resume: {str(e)}")
     
     async def polish_text(self, text: str) -> str:
         """
