@@ -5,9 +5,8 @@ Handles geocoding, route calculation, and location-based queries
 
 import os
 from typing import Dict, List, Optional, Tuple
-from geopy.geocoders import Nominatim, GoogleV3
+from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
-import googlemaps
 from sqlalchemy.orm import Session
 
 class MappingService:
@@ -15,16 +14,11 @@ class MappingService:
     
     def __init__(self):
         # Initialize geocoding services
-        self.google_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
         self.mapbox_api_key = os.getenv("MAPBOX_API_KEY")
         
-        # Use Google Maps if available, otherwise fallback to Nominatim
-        if self.google_api_key:
-            self.geocoder = GoogleV3(api_key=self.google_api_key)
-            self.gmaps = googlemaps.Client(key=self.google_api_key)
-        else:
-            self.geocoder = Nominatim(user_agent="creerlio-platform")
-            self.gmaps = None
+        # Use Nominatim for geocoding (free, no API key required)
+        # Mapbox is used on the frontend for map display
+        self.geocoder = Nominatim(user_agent="creerlio-platform")
     
     async def geocode_address(self, address: str) -> Dict:
         """
@@ -95,66 +89,31 @@ class MappingService:
             Dictionary with route information including distance, duration, steps
         """
         try:
-            if self.gmaps:
-                # Use Google Maps API
-                directions_result = self.gmaps.directions(
-                    origin,
-                    destination,
-                    mode=mode
-                )
-                
-                if not directions_result:
-                    raise ValueError("No route found")
-                
-                route = directions_result[0]
-                leg = route['legs'][0]
-                
-                return {
-                    "distance": {
-                        "text": leg['distance']['text'],
-                        "value": leg['distance']['value']  # meters
-                    },
-                    "duration": {
-                        "text": leg['duration']['text'],
-                        "value": leg['duration']['value']  # seconds
-                    },
-                    "start_address": leg['start_address'],
-                    "end_address": leg['end_address'],
-                    "steps": [
-                        {
-                            "instruction": step['html_instructions'],
-                            "distance": step['distance']['text'],
-                            "duration": step['duration']['text']
-                        }
-                        for step in leg['steps']
-                    ],
-                    "polyline": route['overview_polyline']['points']
-                }
-            else:
-                # Fallback: Calculate straight-line distance
-                origin_coords = await self.geocode_address(origin)
-                dest_coords = await self.geocode_address(destination)
-                
-                origin_point = (origin_coords['latitude'], origin_coords['longitude'])
-                dest_point = (dest_coords['latitude'], dest_coords['longitude'])
-                
-                distance_km = geodesic(origin_point, dest_point).kilometers
-                
-                return {
-                    "distance": {
-                        "text": f"{distance_km:.2f} km",
-                        "value": distance_km * 1000  # meters
-                    },
-                    "duration": {
-                        "text": "N/A (straight-line distance)",
-                        "value": None
-                    },
-                    "start_address": origin_coords['formatted_address'],
-                    "end_address": dest_coords['formatted_address'],
-                    "steps": [],
-                    "polyline": None,
-                    "note": "Straight-line distance only. Google Maps API key required for detailed routing."
-                }
+            # Calculate straight-line distance using geopy
+            # For detailed routing, use Mapbox on the frontend
+            origin_coords = await self.geocode_address(origin)
+            dest_coords = await self.geocode_address(destination)
+            
+            origin_point = (origin_coords['latitude'], origin_coords['longitude'])
+            dest_point = (dest_coords['latitude'], dest_coords['longitude'])
+            
+            distance_km = geodesic(origin_point, dest_point).kilometers
+            
+            return {
+                "distance": {
+                    "text": f"{distance_km:.2f} km",
+                    "value": distance_km * 1000  # meters
+                },
+                "duration": {
+                    "text": "N/A (straight-line distance)",
+                    "value": None
+                },
+                "start_address": origin_coords['formatted_address'],
+                "end_address": dest_coords['formatted_address'],
+                "steps": [],
+                "polyline": None,
+                "note": "Straight-line distance only. Use Mapbox on frontend for detailed routing."
+            }
         except Exception as e:
             raise Exception(f"Route calculation error: {str(e)}")
     
