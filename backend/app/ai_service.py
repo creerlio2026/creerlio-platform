@@ -392,6 +392,8 @@ IMPORTANT: Make sure you extract EVERY work experience entry. Look carefully thr
         Returns:
             Dictionary with summary, key points, action items, and sentiment
         """
+        if not self.openai_client:
+            raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
         try:
             if not transcription_text or not transcription_text.strip():
                 raise ValueError("Transcription text is required for summarization")
