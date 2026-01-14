@@ -8,11 +8,22 @@ import base64
 from typing import Dict, List, Optional
 import json
 from openai import OpenAI
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
 import PyPDF2
 import docx
 import io
+
+# Optional LangChain imports - only import if available
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    try:
+        # Fallback for older langchain versions
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        LANGCHAIN_AVAILABLE = True
+    except ImportError:
+        LANGCHAIN_AVAILABLE = False
+        RecursiveCharacterTextSplitter = None
 
 class AIService:
     """AI-powered resume parsing service"""
@@ -20,10 +31,14 @@ class AIService:
     def __init__(self):
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=4000,
-            chunk_overlap=200
-        )
+        # Initialize text splitter only if langchain is available
+        if LANGCHAIN_AVAILABLE and RecursiveCharacterTextSplitter:
+            self.text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=4000,
+                chunk_overlap=200
+            )
+        else:
+            self.text_splitter = None
     
     async def parse_resume(self, file_content: bytes, filename: str) -> Dict:
         """
