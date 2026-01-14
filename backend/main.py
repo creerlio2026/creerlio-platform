@@ -46,7 +46,15 @@ from app.auth import (
 from datetime import timedelta, datetime
 import uuid
 
+# Load environment variables
 load_dotenv()
+
+# ==================== CRASH PREVENTION ====================
+# Log critical environment variables (don't crash if missing)
+print("🚀 App booting...")
+print(f"PORT: {os.getenv('PORT', 'NOT SET')}")
+print(f"SUPABASE_URL: {'SET' if os.getenv('SUPABASE_URL') else 'NOT SET'}")
+print(f"DATABASE_URL: {'SET' if os.getenv('DATABASE_URL') else 'NOT SET'}")
 
 # Initialize services with error handling
 

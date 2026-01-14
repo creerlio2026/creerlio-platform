@@ -41,8 +41,9 @@ def handle_async_exception(loop, context):
 
 # ==================== STARTUP LOGS ====================
 print("=" * 60)
-print("🚀 Creerlio Platform - Backend Startup")
+print("🚀 App booting...")
 print("=" * 60)
+print(f"PORT: {os.getenv('PORT', 'NOT SET')}")
 print(f"Python version: {sys.version}")
 print(f"Working directory: {os.getcwd()}")
 print(f"Python path: {sys.path[0]}")
