@@ -1592,20 +1592,34 @@ async def delete_account(request: Request):
 
 
 if __name__ == "__main__":
+    # MANDATORY: Use PORT from environment, bind to 0.0.0.0 for Railway
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
+    port_str = os.getenv("PORT")
+    if not port_str:
+        print("⚠️  WARNING: PORT environment variable not set, using default 8000")
+        port = 8000
+    else:
+        port = int(port_str)
     
+    # Ensure we bind to 0.0.0.0 (not localhost)
+    if host != "0.0.0.0":
+        print(f"⚠️  WARNING: HOST is {host}, overriding to 0.0.0.0 for Railway")
+        host = "0.0.0.0"
+    
+    print(f"Starting server on {host}:{port}")
     
     try:
         # Use app directly instead of string import to avoid module caching issues
         uvicorn.run(
             app,
-            host=host,
-            port=port,
-            reload=False  # Disable reload to ensure routes are registered correctly
+            host=host,  # MANDATORY: 0.0.0.0
+            port=port,  # MANDATORY: From environment
+            reload=False  # Disable reload for production
         )
     except Exception as e:
-        
+        print(f"❌ Server startup failed: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
