@@ -1607,21 +1607,16 @@ async def delete_account(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
 
 
+# NOTE: This block is for local development only
+# Railway uses start.py as the entry point (single source of truth)
+# DO NOT use this in production - Railway will use start.py
 if __name__ == "__main__":
-    # HARD ENFORCE RAILWAY PORT & HOST
-    # Delete all hardcoded ports - use only process.env.PORT
-    PORT = int(os.getenv("PORT", "8000"))  # Fallback only for local dev
-    HOST = "0.0.0.0"  # MANDATORY: Never localhost
-    
+    # Local dev only - Railway uses start.py
+    PORT = int(os.getenv("PORT", "8000"))
+    HOST = "0.0.0.0"
+    print(f"⚠️  Local dev mode - Railway uses start.py")
     print(f"✅ Server listening on {PORT}")
-    
-    # SINGLE SOURCE OF TRUTH - Only one server listen call
-    uvicorn.run(
-        app,
-        host=HOST,  # MANDATORY: 0.0.0.0
-        port=PORT,  # MANDATORY: From process.env.PORT
-        reload=False  # Production mode
-    )
+    uvicorn.run(app, host=HOST, port=PORT, reload=False)
 
 
 # ==================== Admin Panel API ====================

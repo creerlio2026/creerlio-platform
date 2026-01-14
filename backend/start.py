@@ -12,14 +12,18 @@ import atexit
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ==================== CRASH DETECTION ====================
+# ==================== CRASH-PROOF STARTUP (NO SILENT FAILURES) ====================
+# At the very top - before anything else
+print("🚀 Boot sequence starting")
+print(f"ENV PORT: {os.getenv('PORT', 'NOT SET')}")
+
 def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
-    """Handle unhandled exceptions"""
+    """Handle unhandled exceptions - Railway kills silent processes"""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
     print("\n" + "=" * 60)
-    print("❌ UNHANDLED EXCEPTION - Application will exit")
+    print("❌ Uncaught Exception:", exc_value)
     print("=" * 60)
     import traceback
     traceback.print_exception(exc_type, exc_value, exc_traceback)
@@ -27,29 +31,25 @@ def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = handle_unhandled_exception
 
-# Handle unhandled async exceptions
+# Handle unhandled async exceptions (unhandled rejections)
 import asyncio
 def handle_async_exception(loop, context):
-    """Handle unhandled async exceptions"""
+    """Handle unhandled async exceptions - Railway kills silent processes"""
     exception = context.get('exception')
     if exception:
-        print(f"\n❌ UNHANDLED ASYNC EXCEPTION: {exception}")
+        print(f"\n❌ Unhandled Rejection: {exception}")
         import traceback
         traceback.print_exception(type(exception), exception, exception.__traceback__)
     else:
-        print(f"\n❌ ASYNC ERROR: {context.get('message', 'Unknown error')}")
+        print(f"\n❌ Unhandled Rejection: {context.get('message', 'Unknown error')}")
 
-# ==================== STARTUP LOGS ====================
-print("=" * 60)
-print("🚀 Boot sequence starting")
-print("=" * 60)
-print(f"ENV PORT: {os.getenv('PORT', 'NOT SET')}")
+# Additional startup info
 print(f"Python version: {sys.version}")
 print(f"Working directory: {os.getcwd()}")
 print(f"Python path: {sys.path[0]}")
 
-# ==================== ENVIRONMENT VARIABLES ====================
-print("\n[ENV] Checking environment variables...")
+# ==================== HARD ENFORCE RAILWAY PORT & HOST ====================
+# Delete all hardcoded ports - use only process.env.PORT
 PORT = os.getenv("PORT")
 if not PORT:
     print("⚠️  WARNING: PORT environment variable not set, using default 8000")
@@ -57,29 +57,29 @@ if not PORT:
     PORT = "8000"
 
 try:
-    PORT = int(PORT)
+    PORT = int(PORT)  # Number(process.env.PORT) equivalent
 except ValueError:
     print(f"❌ ERROR: PORT must be a number, got: {PORT}")
     sys.exit(1)
 
-HOST = os.getenv("HOST", "0.0.0.0")
-print(f"✓ HOST: {HOST}")
+# MANDATORY: Always 0.0.0.0 (never localhost)
+HOST = "0.0.0.0"
+print(f"✓ HOST: {HOST} (hard-enforced for Railway)")
 print(f"✓ PORT: {PORT}")
 
-# Check critical env vars (warn but don't fail)
-critical_vars = {
-    "SUPABASE_URL": os.getenv("SUPABASE_URL"),
-    "SUPABASE_ANON_KEY": os.getenv("SUPABASE_ANON_KEY"),
-    "SUPABASE_SERVICE_ROLE_KEY": os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
-    "DATABASE_URL": os.getenv("DATABASE_URL"),
-}
+# ==================== ENV VAR SAFETY (NO HARD CRASHES) ====================
+# Convert all required env vars to soft-fail with warnings
+def warn_missing_env(name: str):
+    """Warn but don't crash on missing env vars"""
+    if not os.getenv(name):
+        print(f"⚠️ Missing env: {name}")
 
-missing_vars = [k for k, v in critical_vars.items() if not v]
-if missing_vars:
-    print(f"⚠️  WARNING: Missing environment variables: {', '.join(missing_vars)}")
-    print("   App will start but some features may not work")
-else:
-    print("✓ All critical environment variables present")
+warn_missing_env("DATABASE_URL")
+warn_missing_env("SUPABASE_URL")
+warn_missing_env("SUPABASE_ANON_KEY")
+warn_missing_env("SUPABASE_SERVICE_ROLE_KEY")
+
+# The app must still boot even if envs are missing
 
 # ==================== APP BOOTING ====================
 print("\n" + "=" * 60)
