@@ -51,29 +51,39 @@ load_dotenv()
 # Initialize services with error handling
 
 
-try:
-    
-    ai_service = AIService()
-    
-except Exception as e:
-    
-    print(f"Warning: AIService initialization failed: {e}")
-    ai_service = None
+# Initialize services with error handling
+ai_service = None
+if AIService:
+    try:
+        ai_service = AIService()
+        print("✓ AIService initialized")
+    except Exception as e:
+        print(f"⚠ Warning: AIService initialization failed: {e}")
+        ai_service = None
+else:
+    print("⚠ AIService not available (import failed)")
 
-try:
-    pdf_generator = PDFGenerator() if PDF_GENERATOR_AVAILABLE else None
-except Exception as e:
-    
-    pdf_generator = None
+pdf_generator = None
+if PDF_GENERATOR_AVAILABLE and PDFGenerator:
+    try:
+        pdf_generator = PDFGenerator()
+        print("✓ PDFGenerator initialized")
+    except Exception as e:
+        print(f"⚠ Warning: PDFGenerator initialization failed: {e}")
+        pdf_generator = None
+else:
+    print("⚠ PDFGenerator not available")
 
-try:
-    
-    mapping_service = MappingService()
-    
-except Exception as e:
-    
-    print(f"Warning: MappingService initialization failed: {e}")
-    mapping_service = None
+mapping_service = None
+if MappingService:
+    try:
+        mapping_service = MappingService()
+        print("✓ MappingService initialized")
+    except Exception as e:
+        print(f"⚠ Warning: MappingService initialization failed: {e}")
+        mapping_service = None
+else:
+    print("⚠ MappingService not available (import failed)")
 
 
 @asynccontextmanager
