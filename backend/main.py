@@ -153,6 +153,23 @@ async def add_cors_header(request: Request, call_next):
             }
         )
 
+# Health Check - MUST work without any dependencies
+@app.get("/")
+async def root():
+    """Root endpoint - no dependencies"""
+    return {"message": "Creerlio Platform API", "status": "healthy"}
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint - completely independent, no database or services required"""
+    return {
+        "status": "healthy",
+        "service": "creerlio-platform",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 @app.post("/api/auth/register")
 async def register(request: Request, db=Depends(get_db)):
     """Register a new user - Password completely removed during construction"""
