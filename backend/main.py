@@ -123,9 +123,13 @@ async def add_cors_header(request: Request, call_next):
         response = await call_next(request)
         # Only add headers if response supports it
         if hasattr(response, 'headers') and response.headers is not None:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "*"
-            response.headers["Access-Control-Allow-Headers"] = "*"
+            try:
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Methods"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+            except (AttributeError, TypeError):
+                # Headers can't be modified, that's okay - continue
+                pass
         return response
     except Exception as e:
         # Return error with CORS headers

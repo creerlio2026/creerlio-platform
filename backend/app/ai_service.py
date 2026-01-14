@@ -29,7 +29,16 @@ class AIService:
     """AI-powered resume parsing service"""
     
     def __init__(self):
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Initialize OpenAI client - allow None API key (will fail gracefully on use)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key:
+            try:
+                self.openai_client = OpenAI(api_key=openai_key)
+            except Exception as e:
+                print(f"Warning: Failed to initialize OpenAI client: {e}")
+                self.openai_client = None
+        else:
+            self.openai_client = None
         self.model = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
         # Initialize text splitter only if langchain is available
         if LANGCHAIN_AVAILABLE and RecursiveCharacterTextSplitter:
@@ -51,6 +60,8 @@ class AIService:
         Returns:
             Dictionary with parsed resume data
         """
+        if not self.openai_client:
+            raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
         try:
             print(f"[AI_SERVICE] Extracting text from {filename}...")
             # Extract text from file
@@ -93,6 +104,9 @@ class AIService:
         """
         if not text or not text.strip():
             return text
+        
+        if not self.openai_client:
+            raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
         
         try:
             system_prompt = """You are a professional writing assistant. Your task is to polish and improve the provided text.
@@ -204,6 +218,8 @@ Return only the polished text without any explanations or additional commentary.
     
     async def _parse_with_ai(self, text: str, filename: str) -> Dict:
         """Use OpenAI to parse and structure resume text"""
+        if not self.openai_client:
+            raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
         
         system_prompt = """You are an expert resume parser. Your primary task is to extract ALL work experience entries from the resume text.
 
@@ -461,6 +477,8 @@ Provide a comprehensive summary in JSON format."""
     
     async def enhance_resume_data(self, resume_data: Dict) -> Dict:
         """Enhance resume data with AI insights and suggestions"""
+        if not self.openai_client:
+            raise Exception("OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.")
         try:
             prompt = f"""Analyze this resume data and provide enhancements:
             - Suggest missing skills based on experience
