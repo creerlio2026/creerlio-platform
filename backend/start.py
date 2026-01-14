@@ -17,16 +17,29 @@ print(f"Working directory: {os.getcwd()}")
 print(f"Python path: {sys.path[0]}")
 
 try:
-    print("\n[1/3] Importing FastAPI and uvicorn...")
+    print("\n[1/4] Importing FastAPI and uvicorn...")
     import uvicorn
     from fastapi import FastAPI
     print("✓ FastAPI and uvicorn imported successfully")
     
-    print("\n[2/3] Importing main application module...")
-    from main import app
-    print("✓ Main application imported successfully")
+    print("\n[2/4] Attempting to import main application module...")
+    try:
+        from main import app
+        print("✓ Main application imported successfully")
+        app_source = "main"
+    except Exception as main_error:
+        print(f"⚠ Main application import failed: {main_error}")
+        print("   Falling back to minimal app...")
+        try:
+            from minimal_app import app
+            print("✓ Minimal app imported successfully")
+            app_source = "minimal"
+        except Exception as minimal_error:
+            print(f"❌ Minimal app also failed: {minimal_error}")
+            raise
     
-    print("\n[3/3] Starting server...")
+    print(f"\n[3/4] Using app from: {app_source}")
+    print("\n[4/4] Starting server...")
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
     

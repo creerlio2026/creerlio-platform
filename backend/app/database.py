@@ -78,18 +78,24 @@ def init_db():
 def get_db():
     """Dependency for getting database session"""
     if not SessionLocal:
+        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="Database not configured")
-    db = SessionLocal()
     try:
-        # Test connection (SQLAlchemy 2.0 syntax)
-        db.execute(text("SELECT 1"))
-        yield db
+        db = SessionLocal()
+        try:
+            # Test connection (SQLAlchemy 2.0 syntax)
+            db.execute(text("SELECT 1"))
+            yield db
+        except Exception as e:
+            db.rollback()
+            print(f"Database connection error: {e}")
+            from fastapi import HTTPException
+            raise HTTPException(status_code=503, detail=f"Database connection failed: {str(e)}")
+        finally:
+            db.close()
     except Exception as e:
-        db.rollback()
-        print(f"Database connection error: {e}")
-        raise HTTPException(status_code=503, detail=f"Database connection failed: {str(e)}")
-    finally:
-        db.close()
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"Database error: {str(e)}")
 
 
 @contextmanager
