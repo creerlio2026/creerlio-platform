@@ -181,7 +181,7 @@ async def health_check():
 
 
 @app.post("/api/auth/register")
-async def register(request: Request, db=Depends(get_db)):
+async def register(request: Request, db=Depends(get_db) if get_db else None):
     """Register a new user - Password completely removed during construction"""
     
     try:
