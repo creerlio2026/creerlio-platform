@@ -41,9 +41,9 @@ def handle_async_exception(loop, context):
 
 # ==================== STARTUP LOGS ====================
 print("=" * 60)
-print("🚀 App booting...")
+print("🚀 Boot sequence starting")
 print("=" * 60)
-print(f"PORT: {os.getenv('PORT', 'NOT SET')}")
+print(f"ENV PORT: {os.getenv('PORT', 'NOT SET')}")
 print(f"Python version: {sys.version}")
 print(f"Working directory: {os.getcwd()}")
 print(f"Python path: {sys.path[0]}")
@@ -126,11 +126,13 @@ try:
     print("🚀 Server starting...")
     print("=" * 60)
     
-    # Start server - this blocks
+    # SINGLE SOURCE OF TRUTH - Only one server listen call
+    # MANDATORY: Bind to 0.0.0.0 and use PORT from environment
+    print(f"✅ Server listening on {PORT}")
     uvicorn.run(
         app,
-        host=HOST,  # MANDATORY: 0.0.0.0
-        port=PORT,  # MANDATORY: From environment
+        host=HOST,  # MANDATORY: 0.0.0.0 (not localhost)
+        port=PORT,  # MANDATORY: From process.env.PORT
         log_level="info",
         access_log=True
     )

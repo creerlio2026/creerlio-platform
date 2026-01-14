@@ -51,10 +51,18 @@ load_dotenv()
 
 # ==================== CRASH PREVENTION ====================
 # Log critical environment variables (don't crash if missing)
-print("🚀 App booting...")
-print(f"PORT: {os.getenv('PORT', 'NOT SET')}")
-print(f"SUPABASE_URL: {'SET' if os.getenv('SUPABASE_URL') else 'NOT SET'}")
-print(f"DATABASE_URL: {'SET' if os.getenv('DATABASE_URL') else 'NOT SET'}")
+print("🚀 Boot sequence starting")
+print(f"ENV PORT: {os.getenv('PORT', 'NOT SET')}")
+
+# Soft-fail env var warnings (NO HARD CRASHES)
+def warn_missing_env(name: str):
+    if not os.getenv(name):
+        print(f"⚠️ Missing env: {name}")
+
+warn_missing_env("DATABASE_URL")
+warn_missing_env("SUPABASE_URL")
+warn_missing_env("SUPABASE_ANON_KEY")
+warn_missing_env("SUPABASE_SERVICE_ROLE_KEY")
 
 # Initialize services with error handling
 
@@ -1600,35 +1608,20 @@ async def delete_account(request: Request):
 
 
 if __name__ == "__main__":
-    # MANDATORY: Use PORT from environment, bind to 0.0.0.0 for Railway
-    host = os.getenv("HOST", "0.0.0.0")
-    port_str = os.getenv("PORT")
-    if not port_str:
-        print("⚠️  WARNING: PORT environment variable not set, using default 8000")
-        port = 8000
-    else:
-        port = int(port_str)
+    # HARD ENFORCE RAILWAY PORT & HOST
+    # Delete all hardcoded ports - use only process.env.PORT
+    PORT = int(os.getenv("PORT", "8000"))  # Fallback only for local dev
+    HOST = "0.0.0.0"  # MANDATORY: Never localhost
     
-    # Ensure we bind to 0.0.0.0 (not localhost)
-    if host != "0.0.0.0":
-        print(f"⚠️  WARNING: HOST is {host}, overriding to 0.0.0.0 for Railway")
-        host = "0.0.0.0"
+    print(f"✅ Server listening on {PORT}")
     
-    print(f"Starting server on {host}:{port}")
-    
-    try:
-        # Use app directly instead of string import to avoid module caching issues
-        uvicorn.run(
-            app,
-            host=host,  # MANDATORY: 0.0.0.0
-            port=port,  # MANDATORY: From environment
-            reload=False  # Disable reload for production
-        )
-    except Exception as e:
-        print(f"❌ Server startup failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
+    # SINGLE SOURCE OF TRUTH - Only one server listen call
+    uvicorn.run(
+        app,
+        host=HOST,  # MANDATORY: 0.0.0.0
+        port=PORT,  # MANDATORY: From process.env.PORT
+        reload=False  # Production mode
+    )
 
 
 # ==================== Admin Panel API ====================

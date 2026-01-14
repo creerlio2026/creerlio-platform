@@ -23,8 +23,9 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     import os
-    # MANDATORY: Use PORT from environment, bind to 0.0.0.0
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
-    print(f"Starting minimal app on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    # HARD ENFORCE RAILWAY PORT & HOST
+    PORT = int(os.getenv("PORT", "8000"))  # Fallback only
+    HOST = "0.0.0.0"  # MANDATORY: Never localhost
+    print(f"✅ Server listening on {PORT}")
+    # SINGLE SOURCE OF TRUTH - Only one server listen call
+    uvicorn.run(app, host=HOST, port=PORT)
