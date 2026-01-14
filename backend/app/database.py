@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
+from fastapi import HTTPException
 from app.models import Base
 
 # Database URL from environment
@@ -27,28 +28,41 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 # Create engine with connection pool settings
 # For SQLite, use NullPool and enable check_same_thread=False
-if "sqlite" in DATABASE_URL:
-    engine = create_engine(
-        DATABASE_URL,
-        poolclass=NullPool,
-        connect_args={"check_same_thread": False},
-        echo=os.getenv("DB_ECHO", "False").lower() == "true"
-    )
-else:
-    # PostgreSQL or other databases
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,  # Verify connections before using
-        pool_recycle=3600,   # Recycle connections after 1 hour
-        echo=os.getenv("DB_ECHO", "False").lower() == "true"
-    )
+# On Railway, we should use Supabase PostgreSQL, not SQLite
+try:
+    if "sqlite" in DATABASE_URL.lower():
+        engine = create_engine(
+            DATABASE_URL,
+            poolclass=NullPool,
+            connect_args={"check_same_thread": False},
+            echo=os.getenv("DB_ECHO", "False").lower() == "true"
+        )
+    else:
+        # PostgreSQL or other databases
+        engine = create_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,  # Verify connections before using
+            pool_recycle=3600,   # Recycle connections after 1 hour
+            echo=os.getenv("DB_ECHO", "False").lower() == "true"
+        )
+except Exception as e:
+    print(f"Warning: Failed to create database engine: {e}")
+    # Create a dummy engine that won't crash
+    engine = None
 
-# Session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Session factory (only if engine exists)
+if engine:
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+else:
+    # Dummy sessionmaker that won't crash
+    SessionLocal = None
 
 
 def init_db():
     """Initialize database tables"""
+    if not engine:
+        print("Warning: Database engine not available, skipping table creation")
+        return
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
@@ -59,6 +73,8 @@ def init_db():
 
 def get_db():
     """Dependency for getting database session"""
+    if not SessionLocal:
+        raise HTTPException(status_code=503, detail="Database not configured")
     db = SessionLocal()
     try:
         # Test connection (SQLAlchemy 2.0 syntax)
@@ -67,7 +83,7 @@ def get_db():
     except Exception as e:
         db.rollback()
         print(f"Database connection error: {e}")
-        raise
+        raise HTTPException(status_code=503, detail=f"Database connection failed: {str(e)}")
     finally:
         db.close()
 
