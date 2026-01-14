@@ -16,10 +16,8 @@ from app.models import Base
 # For Supabase, use: postgresql://postgres:[PASSWORD]@[PROJECT_REF].supabase.co:5432/postgres
 # Or use Supabase connection pooler: postgresql://postgres:[PASSWORD]@[PROJECT_REF].pooler.supabase.com:6543/postgres
 # Default to SQLite for local development
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite:///./creerlio.db"
-)
+# On Railway, if DATABASE_URL is not set, we'll skip database initialization
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Supabase connection (optional - for direct Supabase client usage)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -29,26 +27,32 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 # Create engine with connection pool settings
 # For SQLite, use NullPool and enable check_same_thread=False
 # On Railway, we should use Supabase PostgreSQL, not SQLite
-try:
-    if "sqlite" in DATABASE_URL.lower():
-        engine = create_engine(
-            DATABASE_URL,
-            poolclass=NullPool,
-            connect_args={"check_same_thread": False},
-            echo=os.getenv("DB_ECHO", "False").lower() == "true"
-        )
-    else:
-        # PostgreSQL or other databases
-        engine = create_engine(
-            DATABASE_URL,
-            pool_pre_ping=True,  # Verify connections before using
-            pool_recycle=3600,   # Recycle connections after 1 hour
-            echo=os.getenv("DB_ECHO", "False").lower() == "true"
-        )
-except Exception as e:
-    print(f"Warning: Failed to create database engine: {e}")
-    # Create a dummy engine that won't crash
-    engine = None
+engine = None
+if DATABASE_URL:
+    try:
+        if "sqlite" in DATABASE_URL.lower():
+            engine = create_engine(
+                DATABASE_URL,
+                poolclass=NullPool,
+                connect_args={"check_same_thread": False},
+                echo=os.getenv("DB_ECHO", "False").lower() == "true"
+            )
+        else:
+            # PostgreSQL or other databases
+            engine = create_engine(
+                DATABASE_URL,
+                pool_pre_ping=True,  # Verify connections before using
+                pool_recycle=3600,   # Recycle connections after 1 hour
+                echo=os.getenv("DB_ECHO", "False").lower() == "true"
+            )
+        print(f"Database engine created successfully")
+    except Exception as e:
+        print(f"Warning: Failed to create database engine: {e}")
+        import traceback
+        print(traceback.format_exc())
+        engine = None
+else:
+    print("Warning: DATABASE_URL not set, database features will be disabled")
 
 # Session factory (only if engine exists)
 if engine:

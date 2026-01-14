@@ -78,19 +78,25 @@ except Exception as e:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup on startup/shutdown"""
+    """Initialize and cleanup on startup/shutdown - completely non-blocking"""
+    print("=" * 50)
+    print("Starting Creerlio Platform API")
+    print("=" * 50)
+    
     # Initialize database (non-blocking - won't crash app if it fails)
     try:
         init_db()
-        print("Database initialization completed")
+        print("✓ Database initialization completed")
     except Exception as e:
-        print(f"Warning: Database initialization failed during startup: {e}")
+        print(f"⚠ Warning: Database initialization failed (app will continue): {e}")
         import traceback
-        print(traceback.format_exc())
+        traceback.print_exc()
     
-    print("Application startup complete")
+    print("=" * 50)
+    print("Application startup complete - ready to accept requests")
+    print("=" * 50)
     yield
-    # Cleanup if needed
+    
     print("Application shutdown")
 
 
