@@ -79,12 +79,11 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup on startup/shutdown"""
-    # Initialize database
-    init_db()
-    
-    # Log all registered routes on startup (after all routes are registered)
-    
-    
+    # Initialize database (non-blocking - won't crash app if it fails)
+    try:
+        init_db()
+    except Exception as e:
+        print(f"Warning: Database initialization failed during startup: {e}")
     
     yield
     # Cleanup if needed

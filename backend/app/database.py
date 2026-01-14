@@ -49,7 +49,12 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
     """Initialize database tables"""
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Warning: Database initialization failed: {e}")
+        # Don't raise - allow app to start even if DB init fails
+        pass
 
 
 def get_db():
