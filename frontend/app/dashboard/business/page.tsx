@@ -15,7 +15,7 @@ interface User {
   is_active: boolean
 }
 
-type TabType = 'overview' | 'vacancies' | 'profile' | 'portfolio' | 'applications' | 'connections'
+type TabType = 'overview' | 'vacancies' | 'profile' | 'portfolio' | 'applications' | 'connections' | 'service_connections'
 
 export default function BusinessDashboard() {
   const router = useRouter()
@@ -26,6 +26,7 @@ export default function BusinessDashboard() {
   const [hasBuiltProfile, setHasBuiltProfile] = useState<boolean>(false)
   const [applications, setApplications] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('overview')
+  const isServiceConnections = activeTab === 'service_connections'
   const [userType, setUserType] = useState<string>('business')
 
   // Vacancies (Jobs) state
@@ -36,10 +37,29 @@ export default function BusinessDashboard() {
 
   const [connLoading, setConnLoading] = useState(false)
   const [connError, setConnError] = useState<string | null>(null)
-  const [connRequests, setConnRequests] = useState<any[]>([])
+  const [connRequestsFromTalent, setConnRequestsFromTalent] = useState<any[]>([]) // Pending requests initiated by talent
+  const [connRequestsFromBusiness, setConnRequestsFromBusiness] = useState<any[]>([]) // Pending requests initiated by business (via map search)
+  const [connReconnectRequests, setConnReconnectRequests] = useState<any[]>([]) // Pending reconnection requests
   const [connAccepted, setConnAccepted] = useState<any[]>([])
   const [connDeclined, setConnDeclined] = useState<any[]>([])
+  const [connWithdrawn, setConnWithdrawn] = useState<any[]>([]) // Previous connections - talents who withdrew
   const [hasReloadedForMissingNames, setHasReloadedForMissingNames] = useState(false)
+  const [sendingOpportunity, setSendingOpportunity] = useState<string | null>(null) // Track which talent is being sent an opportunity
+  const [acceptingReconnect, setAcceptingReconnect] = useState<string | null>(null) // Track which reconnection is being accepted
+  const [reconnectModal, setReconnectModal] = useState<{ open: boolean; connection: any | null; message: string }>({
+    open: false,
+    connection: null,
+    message: ''
+  }) // Modal for sending reconnection request with custom message
+  const [connectionSummaryModal, setConnectionSummaryModal] = useState<{ open: boolean; connection: any | null }>({
+    open: false,
+    connection: null
+  }) // Modal for viewing connection summary
+
+  // Reconnection requests from talents (for withdrawn connections)
+  const [reconnectRequests, setReconnectRequests] = useState<any[]>([])
+  const [reconnectLoading, setReconnectLoading] = useState(false)
+  const didAutoLoadReconnectRef = useRef(false)
 
   // Export/Print consent requests (Talent → Business)
   const [consentLoading, setConsentLoading] = useState(false)
@@ -63,6 +83,7 @@ export default function BusinessDashboard() {
       const params = new URLSearchParams(window.location.search)
       const tab = params.get('tab')
       if (tab === 'connections') setActiveTab('connections')
+      if (tab === 'service_connections') setActiveTab('service_connections')
       if (tab === 'vacancies') setActiveTab('vacancies')
     } catch {}
   }, [])
@@ -165,6 +186,12 @@ export default function BusinessDashboard() {
   const [videoChatSession, setVideoChatSession] = useState<any | null>(null)
   const [videoChatLoading, setVideoChatLoading] = useState(false)
   const [videoChatError, setVideoChatError] = useState<string | null>(null)
+
+  const [serviceConnections, setServiceConnections] = useState<
+    Array<{ talent_id: string; conversation_id: string; talent_name: string; last_message: string; last_at: string }>
+  >([])
+  const [serviceLoading, setServiceLoading] = useState(false)
+  const [serviceError, setServiceError] = useState<string | null>(null)
   const [msgConversationId, setMsgConversationId] = useState<string | null>(null)
   const [msgItems, setMsgItems] = useState<
     Array<{ id: string; sender_type: string; body: string; created_at: string }>
@@ -315,6 +342,12 @@ export default function BusinessDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
+  useEffect(() => {
+    if (activeTab !== 'service_connections') return
+    loadServiceConnections().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
+
   async function loadConnections() {
     setConnLoading(true)
     setConnError(null)
@@ -334,9 +367,9 @@ export default function BusinessDashboard() {
 
       const reqRes = await supabase
         .from('talent_connection_requests')
-        .select('id, talent_id, status, selected_sections, created_at, responded_at')
+        .select('id, talent_id, status, selected_sections, created_at, responded_at, initiated_by, reconnect_requested_by, reconnect_message')
         .eq('business_id', businessId)
-          .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false })
 
       if (reqRes.error) {
         if (/Could not find the table/i.test(reqRes.error.message)) {
@@ -345,18 +378,75 @@ export default function BusinessDashboard() {
           )
           return
         }
+        // If initiated_by column doesn't exist yet, retry without it
+        // Supabase/PostgREST error format: "column [table].[col] does not exist" (code 42703)
+        if (/does not exist/i.test(reqRes.error.message) || reqRes.error.code === '42703') {
+          console.log('[Business Connections] Some columns not found, retrying with basic query')
+          const basicReqRes = await supabase
+            .from('talent_connection_requests')
+            .select('id, talent_id, status, selected_sections, created_at, responded_at')
+            .eq('business_id', businessId)
+            .order('created_at', { ascending: false })
+
+          if (basicReqRes.error) {
+            setConnError(basicReqRes.error.message)
+            return
+          }
+          // Add default values for missing columns
+          const basicReqs = (basicReqRes.data || []).map((r: any) => ({
+            ...r,
+            // Infer initiated_by: if has selected_sections with content, talent initiated
+            initiated_by: (r.selected_sections && Array.isArray(r.selected_sections) && r.selected_sections.length > 0) ? 'talent' : 'business',
+            reconnect_requested_by: null,
+            reconnect_message: null
+          }))
+          processConnectionRequests(basicReqs, businessId)
+          return
+        }
         setConnError(reqRes.error.message)
         return
       }
 
-      const reqs = (reqRes.data || []) as any[]
-      const pendingReqs = reqs.filter((r) => r.status === 'pending')
+      processConnectionRequests(reqRes.data || [], businessId)
+    } finally {
+      setConnLoading(false)
+    }
+  }
+
+  async function processConnectionRequests(reqs: any[], businessId: string) {
+      // Separate pending requests by type:
+      // 1. Pending from Talent (first-time connection, talent initiated)
+      // 2. Pending from Business (business reached out via map search)
+      // 3. Pending reconnection requests (status was discontinued, now pending again)
+      const pendingFromTalent = reqs.filter((r) =>
+        r.status === 'pending' &&
+        (r.initiated_by === 'talent' || (!r.initiated_by && r.selected_sections && Array.isArray(r.selected_sections) && r.selected_sections.length > 0)) &&
+        !r.reconnect_requested_by
+      )
+      const pendingFromBusiness = reqs.filter((r) =>
+        r.status === 'pending' &&
+        (r.initiated_by === 'business' || (!r.initiated_by && (!r.selected_sections || !Array.isArray(r.selected_sections) || r.selected_sections.length === 0))) &&
+        !r.reconnect_requested_by
+      )
+      const pendingReconnect = reqs.filter((r) =>
+        r.status === 'pending' && r.reconnect_requested_by
+      )
+
       const acceptedReqs = reqs.filter((r) => r.status === 'accepted')
-      
-      // Fetch talent names for accepted connections
+      const declinedReqs = reqs.filter((r) => r.status === 'rejected' || r.status === 'declined')
+      // Previous connections - talents who withdrew/discontinued their connection
+      const withdrawnReqs = reqs.filter((r) => r.status === 'discontinued')
+
+      // Fetch talent names for all connections (pending, accepted, withdrawn)
       // Priority: portfolio metadata (most reliable) > talent_profiles.name > talent_profiles.title > API route
       // talent_id in talent_connection_requests references talent_profiles(id)
-      const talentIds = Array.from(new Set(acceptedReqs.map((r) => r.talent_id).filter(Boolean)))
+      const talentIds = Array.from(new Set([
+        ...pendingFromTalent,
+        ...pendingFromBusiness,
+        ...pendingReconnect,
+        ...acceptedReqs,
+        ...withdrawnReqs
+      ].map((r) => r.talent_id).filter(Boolean)))
       console.log('[Business Connections] Fetching talent names for IDs:', talentIds)
       let talentNameMap: Record<string, string> = {}
       
@@ -586,12 +676,63 @@ export default function BusinessDashboard() {
       
       console.log('[Business Connections] Final accepted connections with names:', acceptedWithNames.map(r => ({ id: r.talent_id, name: r.talent_name || 'MISSING' })))
       
-      setConnRequests(pendingReqs)
+      // Add talent names to declined connections (same logic as accepted)
+      const declinedWithNames = declinedReqs.map((r) => {
+        const talentIdStr = String(r.talent_id)
+        const talentName = talentNameMap[talentIdStr]
+        return {
+          ...r,
+          talent_name: (talentName && talentName.trim()) || null
+        }
+      })
+
+      // Add talent names to withdrawn/discontinued connections (previous connections)
+      const withdrawnWithNames = withdrawnReqs.map((r) => {
+        const talentIdStr = String(r.talent_id)
+        const talentName = talentNameMap[talentIdStr]
+        return {
+          ...r,
+          talent_name: (talentName && talentName.trim()) || null
+        }
+      })
+
+      // Add talent names to pending requests from talent
+      const pendingFromTalentWithNames = pendingFromTalent.map((r) => {
+        const talentIdStr = String(r.talent_id)
+        const talentName = talentNameMap[talentIdStr]
+        return {
+          ...r,
+          talent_name: (talentName && talentName.trim()) || null
+        }
+      })
+
+      // Add talent names to pending requests from business
+      const pendingFromBusinessWithNames = pendingFromBusiness.map((r) => {
+        const talentIdStr = String(r.talent_id)
+        const talentName = talentNameMap[talentIdStr]
+        return {
+          ...r,
+          talent_name: (talentName && talentName.trim()) || null
+        }
+      })
+
+      // Add talent names to reconnection requests
+      const pendingReconnectWithNames = pendingReconnect.map((r) => {
+        const talentIdStr = String(r.talent_id)
+        const talentName = talentNameMap[talentIdStr]
+        return {
+          ...r,
+          talent_name: (talentName && talentName.trim()) || null
+        }
+      })
+
+      setConnRequestsFromTalent(pendingFromTalentWithNames)
+      setConnRequestsFromBusiness(pendingFromBusinessWithNames)
+      setConnReconnectRequests(pendingReconnectWithNames)
       setConnAccepted(acceptedWithNames)
       setConnDeclined(declinedWithNames)
-    } finally {
+      setConnWithdrawn(withdrawnWithNames)
       setConnLoading(false)
-    }
   }
 
   async function ensureConversation(talentId: string, businessId: string) {
@@ -647,8 +788,201 @@ export default function BusinessDashboard() {
     }
   }
 
+  const loadServiceConnections = async () => {
+    setServiceLoading(true)
+    setServiceError(null)
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession()
+      const uid = sessionRes.session?.user?.id ?? null
+      if (!uid) {
+        setServiceError('Please sign in to view business connections.')
+        setServiceConnections([])
+        return
+      }
+
+      const businessRes = await supabase.from('business_profiles').select('id').eq('user_id', uid).single()
+      if (businessRes.error || !businessRes.data?.id) {
+        setServiceError('No business profile found for this user.')
+        setServiceConnections([])
+        return
+      }
+      const businessId = String(businessRes.data.id)
+
+      const convRes = await supabase
+        .from('conversations')
+        .select('id,talent_id,created_at,updated_at')
+        .eq('business_id', businessId)
+      if (convRes.error) {
+        setServiceError('Failed to load conversations.')
+        setServiceConnections([])
+        return
+      }
+      const conversations = (convRes.data || []) as any[]
+      const convIds = conversations.map((c) => c.id).filter(Boolean)
+      if (convIds.length === 0) {
+        setServiceConnections([])
+        return
+      }
+
+      const msgRes = await supabase
+        .from('messages')
+        .select('id,conversation_id,body,created_at')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      const messages = (msgRes.data || []) as any[]
+      const latestByConv = new Map<string, any>()
+      for (const m of messages) {
+        if (!latestByConv.has(String(m.conversation_id))) {
+          latestByConv.set(String(m.conversation_id), m)
+        }
+      }
+
+      const convWithMsgs = conversations.filter((c) => latestByConv.has(String(c.id)))
+      const talentIds = Array.from(new Set(convWithMsgs.map((c) => c.talent_id).filter(Boolean))).map(String)
+      let nameMap: Record<string, string> = {}
+      if (talentIds.length > 0) {
+        const sel = 'id,name,full_name,display_name'
+        const res = await supabase.from('talent_profiles').select(sel).in('id', talentIds)
+        if (!res.error && res.data) {
+          for (const t of res.data as any[]) {
+            const name = t.name || t.full_name || t.display_name || 'Talent'
+            nameMap[String(t.id)] = name
+          }
+        }
+      }
+
+      const rows = convWithMsgs.map((c) => {
+        const latest = latestByConv.get(String(c.id))
+        return {
+          talent_id: String(c.talent_id),
+          conversation_id: String(c.id),
+          talent_name: nameMap[String(c.talent_id)] || 'Talent',
+          last_message: latest?.body || '',
+          last_at: latest?.created_at || c.updated_at || c.created_at || new Date().toISOString(),
+        }
+      })
+      setServiceConnections(rows)
+      setMsgTalents(rows.map((r) => ({ id: r.talent_id, name: r.talent_name })))
+    } finally {
+      setServiceLoading(false)
+    }
+  }
+
   async function respondConsent(req: any, nextStatus: 'approved' | 'denied') {
     // Placeholder - implement based on business consent flow
+  }
+
+  // Load reconnection requests from talents (business notifications)
+  async function loadReconnectRequests() {
+    setReconnectLoading(true)
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession()
+      const uid = sessionRes.session?.user?.id ?? null
+      if (!uid) {
+        setReconnectRequests([])
+        return
+      }
+
+      const businessRes = await supabase.from('business_profiles').select('id').eq('user_id', uid).single()
+      if (businessRes.error || !businessRes.data?.id) {
+        setReconnectRequests([])
+        return
+      }
+      const businessId = String(businessRes.data.id)
+
+      // Load business notifications of type 'reconnect_request'
+      const notifRes = await supabase
+        .from('business_notifications')
+        .select('id, talent_id, connection_request_id, notification_type, title, message, is_read, created_at, metadata')
+        .eq('business_id', businessId)
+        .eq('notification_type', 'reconnect_request')
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      if (notifRes.error) {
+        // Table might not exist yet - Supabase returns 404 with PGRST116 or 42P01 for missing tables
+        // Also check for "does not exist" or "not found" in message
+        const isTableMissing =
+          notifRes.error.code === 'PGRST116' ||
+          notifRes.error.code === '42P01' ||
+          /relation .* does not exist|Could not find|not found/i.test(notifRes.error.message)
+
+        if (isTableMissing) {
+          console.log('[Business Reconnect] Table not found - feature not yet set up')
+          setReconnectRequests([])
+          return
+        }
+        console.error('[Business Reconnect] Error loading:', notifRes.error)
+        setReconnectRequests([])
+        return
+      }
+
+      const rows = (notifRes.data || []) as any[]
+
+      // Get talent names for reconnect requests
+      const talentIds = Array.from(new Set(rows.map((r) => r.talent_id).filter(Boolean)))
+      let nameMap: Record<string, string> = {}
+      if (talentIds.length > 0) {
+        const nameRes = await supabase
+          .from('talent_profiles')
+          .select('id, name, title')
+          .in('id', talentIds)
+        if (!nameRes.error && nameRes.data) {
+          for (const tp of nameRes.data as any[]) {
+            nameMap[String(tp.id)] = tp.name || tp.title || 'Talent'
+          }
+        }
+      }
+
+      setReconnectRequests(rows.map((r) => ({
+        ...r,
+        talent_name: nameMap[String(r.talent_id)] || r.metadata?.talent_name || 'Talent'
+      })))
+    } finally {
+      setReconnectLoading(false)
+    }
+  }
+
+  // Accept a reconnection request
+  async function acceptReconnect(notif: any) {
+    if (!notif?.connection_request_id) return
+    setAcceptingReconnect(notif.id)
+    try {
+      const { data: sessionRes } = await supabase.auth.getSession()
+      const accessToken = sessionRes?.session?.access_token
+      if (!accessToken) {
+        alert('Please sign in to accept reconnection requests.')
+        return
+      }
+
+      const response = await fetch('/api/connections/accept-reconnect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          connection_request_id: notif.connection_request_id
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        alert(`Connection restored with ${data.talent_name || 'talent'}! Previous messages and history are now available.`)
+        // Reload connections and reconnect requests
+        await Promise.all([loadConnections(), loadReconnectRequests()])
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || errorData.message || 'Failed to accept reconnection')
+      }
+    } catch (err: any) {
+      console.error('Error accepting reconnection:', err)
+      alert(err.message || 'Failed to accept reconnection request. Please try again.')
+    } finally {
+      setAcceptingReconnect(null)
+    }
   }
 
   useEffect(() => {
@@ -660,6 +994,11 @@ export default function BusinessDashboard() {
     if (!didAutoLoadConsentRef.current) {
       didAutoLoadConsentRef.current = true
       loadConsentRequests().catch(() => {})
+    }
+    // Auto-load reconnection requests (only once per session)
+    if (!didAutoLoadReconnectRef.current) {
+      didAutoLoadReconnectRef.current = true
+      loadReconnectRequests().catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
@@ -797,22 +1136,24 @@ export default function BusinessDashboard() {
       }
       const businessId = businessRes.data.id as string
 
-      // Permission gate: accepted connection request must exist to show or send messages
-      const gateRes = await supabase
-        .from('talent_connection_requests')
-        .select('id, status, responded_at')
-        .eq('talent_id', talentId)
-        .eq('business_id', businessId)
-        .eq('status', 'accepted')
-        .order('responded_at', { ascending: false })
-        .limit(1)
+      if (!isServiceConnections) {
+        // Permission gate: accepted connection request must exist to show or send messages
+        const gateRes = await supabase
+          .from('talent_connection_requests')
+          .select('id, status, responded_at')
+          .eq('talent_id', talentId)
+          .eq('business_id', businessId)
+          .eq('status', 'accepted')
+          .order('responded_at', { ascending: false })
+          .limit(1)
 
-      const gate = (gateRes.data || [])[0]
-      if (!gate || gate.status !== 'accepted') {
-        setMsgConversationId(null)
-        setMsgItems([])
-        setMsgError('Connection not accepted. Please accept the connection request first.')
-        return
+        const gate = (gateRes.data || [])[0]
+        if (!gate || gate.status !== 'accepted') {
+          setMsgConversationId(null)
+          setMsgItems([])
+          setMsgError('Connection not accepted. Please accept the connection request first.')
+          return
+        }
       }
 
       // Find existing conversation (lazy creation on first send)
@@ -879,18 +1220,20 @@ export default function BusinessDashboard() {
       const businessId = businessRes.data.id as string
       const talentId = msgSelectedTalentId
 
-      // Permission gate (again, before write) - check for accepted connection
-      const gateRes = await supabase
-        .from('talent_connection_requests')
-        .select('id, status')
-        .eq('talent_id', talentId)
-        .eq('business_id', businessId)
-        .eq('status', 'accepted')
-        .limit(1)
+      if (!isServiceConnections) {
+        // Permission gate (again, before write) - check for accepted connection
+        const gateRes = await supabase
+          .from('talent_connection_requests')
+          .select('id, status')
+          .eq('talent_id', talentId)
+          .eq('business_id', businessId)
+          .eq('status', 'accepted')
+          .limit(1)
 
-      if ((gateRes.data || []).length === 0) {
-        setMsgError('Connection not accepted. Please accept the connection request first.')
-        return
+        if ((gateRes.data || []).length === 0) {
+          setMsgError('Connection not accepted. Please accept the connection request first.')
+          return
+        }
       }
 
       let convId = msgConversationId
@@ -1053,90 +1396,94 @@ export default function BusinessDashboard() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading dashboard...</p>
+          <div className="w-16 h-16 border-4 border-[#20C997] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="container mx-auto px-6 py-4 flex items-center justify-between border-b border-gray-800">
-        <Link href="/" className="flex items-center space-x-2">
-          <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xl">C</span>
+      <header className="bg-black border-0">
+        <div className="max-w-7xl mx-auto px-8 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center space-x-2">
+            <div className="px-4 py-2 rounded-full bg-[#20C997] text-white text-base font-bold">
+              C
+            </div>
+            <span className="text-white text-2xl font-bold">Creerlio</span>
+          </Link>
+          
+          <div className="flex items-center space-x-4">
+            <span className="text-white">Welcome, {userFirstName || user?.full_name || user?.username}</span>
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 text-white hover:text-[#20C997] transition-colors text-left"
+            >
+              Logout
+            </button>
+            <button
+              onClick={handleDeleteRegistration}
+              className="px-4 py-2 text-white hover:text-red-500 transition-colors text-left"
+            >
+              Delete Registration
+            </button>
           </div>
-          <span className="text-white text-2xl font-bold">Creerlio</span>
-        </Link>
-        
-        <div className="flex items-center space-x-4">
-          <span className="text-gray-300">Welcome, {userFirstName || user?.full_name || user?.username}</span>
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            Logout
-          </button>
-          <button
-            onClick={handleDeleteRegistration}
-            className="px-4 py-2 border border-red-600 text-red-300 rounded-lg hover:bg-red-900/20 transition-colors"
-          >
-            Delete Registration
-          </button>
         </div>
       </header>
 
       {/* Dashboard Content */}
-      <div className="container mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Business Dashboard</h1>
-          <p className="text-gray-400">Manage your profile, jobs, and talent connections</p>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">Business Dashboard</h1>
+          <p className="text-gray-600">Manage your profile, jobs, and talent connections</p>
         </div>
 
         {/* Tabs */}
-        <div className="mb-8 border-b border-gray-800">
+        <div className="mb-8 border-b border-gray-200">
           <div className="flex items-center gap-2">
-            {(['overview', 'vacancies', 'portfolio', 'applications', 'connections'] as TabType[]).map((tab) => (
+            {(['overview', 'vacancies', 'portfolio', 'applications', 'connections', 'service_connections'] as TabType[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`px-6 py-3 text-sm font-medium transition-all relative ${
                   activeTab === tab
-                    ? 'text-blue-400'
-                    : 'text-gray-400 hover:text-gray-300'
+                    ? 'text-[#20C997]'
+                    : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 {tab === 'connections'
-                  ? 'Connections'
-                  : tab === 'portfolio'
-                    ? 'View Profile'
-                    : tab === 'vacancies'
-                      ? 'Vacancies'
-                      : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  ? 'Talent Connections'
+                  : tab === 'service_connections'
+                    ? 'Business Connections'
+                    : tab === 'portfolio'
+                      ? 'View Profile'
+                      : tab === 'vacancies'
+                        ? 'Vacancies'
+                        : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 {activeTab === tab && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400"></span>
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#20C997]"></span>
                 )}
               </button>
             ))}
             <Link
               href="/dashboard/business/bank"
-              className="px-6 py-3 text-sm font-medium text-gray-300 hover:text-blue-400 transition-colors"
+              className="px-6 py-3 text-sm font-medium text-gray-600 hover:text-[#20C997] transition-colors"
             >
               Business Bank ↗
             </Link>
             <Link
               href="/business-map"
-              className="px-6 py-3 text-sm font-medium text-gray-300 hover:text-blue-400 transition-colors"
+              className="px-6 py-3 text-sm font-medium text-gray-600 hover:text-[#20C997] transition-colors"
             >
               Business Map ↗
             </Link>
             <Link
               href="/dashboard/business/edit"
-              className="px-6 py-3 text-sm font-medium text-gray-300 hover:text-blue-400 transition-colors"
+              className="px-6 py-3 text-sm font-medium text-gray-600 hover:text-[#20C997] transition-colors"
             >
               Profile Templates ↗
             </Link>
@@ -1149,71 +1496,71 @@ export default function BusinessDashboard() {
             <div className="grid md:grid-cols-3 gap-6 mb-8">
               {/* Stats Card */}
               <div className="dashboard-card rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4">Statistics</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Statistics</h2>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-gray-500 text-sm">Profile Views</p>
-                    <p className="text-3xl font-bold text-blue-400">0</p>
+                    <p className="text-gray-600 text-sm">Profile Views</p>
+                    <p className="text-3xl font-bold text-[#20C997]">0</p>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-sm">Job Postings</p>
+                    <p className="text-gray-600 text-sm">Job Postings</p>
                     <button
                       type="button"
                       onClick={() => setActiveTab('vacancies')}
                       className="text-left"
                       title="Open Vacancies"
                     >
-                      <p className="text-3xl font-bold text-green-400">{Array.isArray(vacancies) ? vacancies.length : 0}</p>
+                      <p className="text-3xl font-bold text-green-600">{Array.isArray(vacancies) ? vacancies.length : 0}</p>
                     </button>
                   </div>
                   <div>
-                    <p className="text-gray-500 text-sm">Connections</p>
-                    <p className="text-3xl font-bold text-purple-400">0</p>
+                    <p className="text-gray-600 text-sm">Connections</p>
+                    <p className="text-3xl font-bold text-purple-600">0</p>
                   </div>
                 </div>
               </div>
 
               {/* Quick Actions */}
               <div className="dashboard-card rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4">Quick Actions</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
                 <div className="space-y-3">
                   {!hasBuiltProfile && (
                     <Link
                       href="/dashboard/business/edit"
-                      className="block px-4 py-3 bg-blue-600 border-2 border-blue-500 rounded-lg text-white hover:bg-blue-500 transition-colors font-semibold text-center"
+                      className="block px-4 py-3 bg-[#20C997] border-2 border-[#20C997] rounded-lg text-white hover:bg-[#1DB886] transition-colors font-semibold text-center"
                     >
                       🏢 Build Your Profile
                     </Link>
                   )}
                   <Link
                     href="/dashboard/business/edit"
-                    className={`block px-4 py-3 ${hasBuiltProfile ? 'bg-blue-500/20 border border-blue-500/50 text-blue-400 hover:bg-blue-500/30' : 'bg-slate-500/10 border border-slate-500/40 text-slate-200 hover:bg-slate-500/20'} rounded-lg transition-colors`}
+                    className={`block px-4 py-3 ${hasBuiltProfile ? 'bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100' : 'bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200'} rounded-lg transition-colors`}
                   >
                     {hasBuiltProfile ? 'Edit Profile' : 'Build Profile'}
                   </Link>
                   <Link
                     href="/dashboard/business/jobs/create"
-                    className="block px-4 py-3 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 transition-colors"
+                    className="block px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-600 hover:bg-blue-100 transition-colors"
                   >
                     Post Job
                   </Link>
                   <Link
                     href="/dashboard/business/bank"
-                    className="block px-4 py-3 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 transition-colors"
+                    className="block px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-600 hover:bg-blue-100 transition-colors"
                   >
                     Business Bank
                   </Link>
                   {hasBuiltProfile && (
                     <Link
                       href="/dashboard/business/view"
-                      className="block px-4 py-3 bg-slate-500/10 border border-slate-500/40 rounded-lg text-slate-200 hover:bg-slate-500/20 transition-colors"
+                      className="block px-4 py-3 bg-gray-100 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-200 transition-colors"
                     >
                       View Profile
                     </Link>
                   )}
                   <Link
                     href="/search"
-                    className="block px-4 py-3 bg-blue-500/20 border border-blue-500/50 rounded-lg text-blue-400 hover:bg-blue-500/30 transition-colors"
+                    className="block px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-600 hover:bg-blue-100 transition-colors"
                   >
                     Search Talent & Jobs
                   </Link>
@@ -1222,23 +1569,23 @@ export default function BusinessDashboard() {
 
               {/* Profile Summary */}
               <div className="dashboard-card rounded-xl p-6">
-                <h2 className="text-xl font-bold text-white mb-4">Profile Summary</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Profile Summary</h2>
                 {user && (
                   <div className="space-y-2">
-                    <p className="text-gray-300"><span className="text-gray-500">Name:</span> {businessProfile?.business_name || businessProfile?.name || user.full_name || user.username}</p>
-                    <p className="text-gray-300"><span className="text-gray-500">Email:</span> {user.email}</p>
+                    <p className="text-gray-700"><span className="text-gray-600">Name:</span> {businessProfile?.business_name || businessProfile?.name || user.full_name || user.username}</p>
+                    <p className="text-gray-700"><span className="text-gray-600">Email:</span> {user.email}</p>
                     {businessProfile?.industry && (
-                      <p className="text-gray-300"><span className="text-gray-500">Industry:</span> {businessProfile.industry}</p>
+                      <p className="text-gray-700"><span className="text-gray-600">Industry:</span> {businessProfile.industry}</p>
                     )}
-                    <div className="pt-2 border-t border-gray-800">
+                    <div className="pt-2 border-t border-gray-200">
                       <div className="flex items-center justify-between mb-1">
-                        <p className="text-gray-500 text-sm">Profile Completion</p>
-                        <span className="text-blue-400 font-semibold text-sm">{calculateProfileCompletion()}%</span>
+                        <p className="text-gray-600 text-sm">Profile Completion</p>
+                        <span className="text-[#20C997] font-semibold text-sm">{calculateProfileCompletion()}%</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-700 rounded-full h-2">
+                        <div className="flex-1 bg-gray-200 rounded-full h-2">
                           <div
-                            className="bg-blue-500 h-2 rounded-full transition-all"
+                            className="bg-[#20C997] h-2 rounded-full transition-all"
                             style={{ width: `${calculateProfileCompletion()}%` }}
                             title={`Profile is ${calculateProfileCompletion()}% complete`}
                           ></div>
@@ -1253,13 +1600,13 @@ export default function BusinessDashboard() {
                         <button
                           type="button"
                           onClick={() => setActiveTab('profile')}
-                          className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                          className="flex-1 px-4 py-2 bg-[#20C997] hover:bg-[#1DB886] text-white text-sm font-medium rounded-lg transition-colors"
                         >
                           Edit Profile
                         </button>
                         <Link
                           href={`/dashboard/business/view`}
-                          className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors text-center"
+                          className="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium rounded-lg transition-colors text-center"
                         >
                           View Profile
                         </Link>
@@ -1272,20 +1619,20 @@ export default function BusinessDashboard() {
 
             {/* Business Profile Section */}
             {!hasBuiltProfile ? (
-              <div className="dashboard-card rounded-xl p-6 border-2 border-blue-500/50 bg-blue-500/10">
+              <div className="dashboard-card rounded-xl p-6 border-2 border-[#20C997] bg-blue-50">
                 <div className="flex items-start justify-between gap-6">
                   <div className="flex-1">
-                    <h2 className="text-2xl font-bold text-white mb-2">Build Your Business Profile</h2>
-                    <p className="text-gray-300 mb-4">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Build Your Business Profile</h2>
+                    <p className="text-gray-700 mb-4">
                       Create a professional profile to showcase your business, attract talent, and post job vacancies. 
                       Your profile will be visible to talent searching for opportunities.
                     </p>
-                    <p className="text-gray-400 text-sm mb-6">
+                    <p className="text-gray-600 text-sm mb-6">
                       Add your business information, upload images, create an introduction video, and customize your profile layout.
                     </p>
                     <Link
                       href="/dashboard/business/edit"
-                      className="inline-block px-8 py-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-semibold text-lg"
+                      className="inline-block px-8 py-4 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors font-semibold text-lg"
                     >
                       Build Your Profile →
                     </Link>
@@ -1295,27 +1642,27 @@ export default function BusinessDashboard() {
               </div>
             ) : businessProfile ? (
               <div className="dashboard-card rounded-xl p-6">
-                <h2 className="text-2xl font-bold text-white mb-4">Business Profile</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Business Profile</h2>
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Industry</h3>
-                    <p className="text-gray-300">{businessProfile.industry || 'Not set'}</p>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Industry</h3>
+                    <p className="text-gray-700">{businessProfile.industry || 'Not set'}</p>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Location</h3>
-                    <p className="text-gray-300">{businessProfile.location || businessProfile.city || 'Not set'}</p>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Location</h3>
+                    <p className="text-gray-700">{businessProfile.location || businessProfile.city || 'Not set'}</p>
                   </div>
                 </div>
-                <div className="mt-6 pt-6 border-t border-gray-800">
+                <div className="mt-6 pt-6 border-t border-gray-200">
                   <Link
                     href="/dashboard/business/edit"
-                    className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors mr-3"
+                    className="inline-block px-6 py-3 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors mr-3"
                   >
                     Edit Profile
                   </Link>
                   <Link
                     href="/dashboard/business/view"
-                    className="inline-block px-6 py-3 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+                    className="inline-block px-6 py-3 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 transition-colors"
                   >
                     View Profile
                   </Link>
@@ -1323,11 +1670,11 @@ export default function BusinessDashboard() {
               </div>
             ) : (
               <div className="dashboard-card rounded-xl p-6">
-                <h2 className="text-2xl font-bold text-white mb-4">Create Your Business Profile</h2>
-                <p className="text-gray-400 mb-4">Complete your profile to start attracting talent</p>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Create Your Business Profile</h2>
+                <p className="text-gray-600 mb-4">Complete your profile to start attracting talent</p>
                 <Link
                   href="/dashboard/business/edit"
-                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  className="inline-block px-6 py-3 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors"
                 >
                   Create Profile
                 </Link>
@@ -1338,33 +1685,33 @@ export default function BusinessDashboard() {
 
         {activeTab === 'profile' && (
           <div className="dashboard-card rounded-xl p-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Your Profile</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Profile</h2>
             {user && (
               <div className="space-y-6">
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
-                    <p className="text-white">{user.email}</p>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Email</label>
+                    <p className="text-gray-900">{user.email}</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Username</label>
-                    <p className="text-white">{user.username}</p>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">Username</label>
+                    <p className="text-gray-900">{user.username}</p>
                   </div>
                   {user.full_name && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-2">Business Name</label>
-                      <p className="text-white">{user.full_name}</p>
+                      <label className="block text-sm font-medium text-gray-600 mb-2">Business Name</label>
+                      <p className="text-gray-900">{user.full_name}</p>
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">User Type</label>
-                    <p className="text-white capitalize">{user.user_type}</p>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">User Type</label>
+                    <p className="text-gray-900 capitalize">{user.user_type}</p>
                   </div>
                 </div>
-                <div className="pt-4 border-t border-gray-800">
+                <div className="pt-4 border-t border-gray-200">
                   <Link
                     href="/dashboard/business/edit"
-                    className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                    className="inline-block px-6 py-3 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors"
                   >
                     Edit Profile
                   </Link>
@@ -1378,8 +1725,8 @@ export default function BusinessDashboard() {
           <div className="space-y-6">
             <div className="dashboard-card rounded-xl p-12 flex items-center justify-center">
               <div className="text-center">
-                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-gray-400">Redirecting to profile view...</p>
+                <div className="w-16 h-16 border-4 border-[#20C997] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-600">Redirecting to profile view...</p>
               </div>
             </div>
           </div>
@@ -1389,15 +1736,15 @@ export default function BusinessDashboard() {
           <div className="dashboard-card rounded-xl p-6">
             <div className="flex items-start justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-white">Vacancies</h2>
-                <p className="text-gray-400 text-sm">
+                <h2 className="text-2xl font-bold text-gray-900">Vacancies</h2>
+                <p className="text-gray-600 text-sm">
                   Your posted job vacancies. Post a job to make it visible here (and on the Jobs page).
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <Link
                   href="/dashboard/business/jobs/create"
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  className="px-4 py-2 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors"
                 >
                   Post a Job
                 </Link>
@@ -1405,7 +1752,7 @@ export default function BusinessDashboard() {
                   type="button"
                   onClick={() => loadVacancies({ force: true })}
                   disabled={vacanciesLoading}
-                  className="px-4 py-2 bg-white/5 border border-white/10 text-gray-200 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-60"
+                  className="px-4 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-60"
                 >
                   Refresh
                 </button>
@@ -1413,15 +1760,15 @@ export default function BusinessDashboard() {
             </div>
 
             {vacanciesError && (
-              <div className="mb-4 border border-red-500/30 bg-red-500/10 text-red-200 rounded-lg p-4">
+              <div className="mb-4 border border-red-300 bg-red-50 text-red-700 rounded-lg p-4">
                 {vacanciesError}
               </div>
             )}
 
             {vacanciesLoading ? (
               <div className="py-10 text-center">
-                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                <p className="text-gray-400">Loading vacancies…</p>
+                <div className="w-12 h-12 border-4 border-[#20C997] border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-gray-600">Loading vacancies…</p>
               </div>
             ) : Array.isArray(vacancies) && vacancies.length > 0 ? (
               <div className="space-y-4">
@@ -1437,31 +1784,31 @@ export default function BusinessDashboard() {
 
                   const badge =
                     status === 'published'
-                      ? 'bg-green-500/20 text-green-300 border-green-500/30'
-                      : 'bg-slate-500/15 text-slate-200 border-slate-500/30'
+                      ? 'bg-green-50 text-green-600 border-green-200'
+                      : 'bg-gray-100 text-gray-600 border-gray-200'
 
                   return (
                     <div
                       key={String(job?.id ?? title)}
-                      className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/30 transition-colors"
+                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="text-lg font-semibold text-white truncate">{title}</h3>
+                            <h3 className="text-lg font-semibold text-gray-900 truncate">{title}</h3>
                             <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${badge}`}>
                               {status.toUpperCase()}
                             </span>
                             {isActive === false ? (
-                              <span className="px-2.5 py-1 rounded-full text-xs font-medium border border-red-500/30 bg-red-500/10 text-red-200">
+                              <span className="px-2.5 py-1 rounded-full text-xs font-medium border border-red-200 bg-red-50 text-red-600">
                                 INACTIVE
                               </span>
                             ) : null}
                           </div>
-                          {loc ? <p className="text-gray-400 text-sm mt-1">📍 {loc}</p> : null}
+                          {loc ? <p className="text-gray-600 text-sm mt-1">📍 {loc}</p> : null}
                           {created ? <p className="text-gray-500 text-xs mt-2">Created: {created}</p> : null}
                           {(job?.application_email || job?.application_url) ? (
-                            <div className="mt-3 text-sm text-gray-300 space-y-1">
+                            <div className="mt-3 text-sm text-gray-700 space-y-1">
                               {job?.application_email ? (
                                 <div>
                                   <span className="text-gray-500">Application Email:</span> {String(job.application_email)}
@@ -1471,7 +1818,7 @@ export default function BusinessDashboard() {
                                 <div className="break-all">
                                   <span className="text-gray-500">Application URL:</span>{' '}
                                   <a
-                                    className="text-blue-300 hover:text-blue-200 underline"
+                                    className="text-blue-600 hover:text-blue-700 underline"
                                     href={String(job.application_url)}
                                     target="_blank"
                                     rel="noreferrer"
@@ -1486,13 +1833,13 @@ export default function BusinessDashboard() {
                         <div className="flex flex-col gap-2 shrink-0">
                           <Link
                             href={`/jobs/${job.id}`}
-                            className="px-3 py-2 bg-white/5 border border-white/10 text-gray-200 rounded-lg hover:bg-white/10 transition-colors text-sm text-center"
+                            className="px-3 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm text-center"
                           >
                             View
                           </Link>
                           <Link
                             href={`/dashboard/business/jobs/edit/${job.id}`}
-                            className="px-3 py-2 bg-blue-500/20 border border-blue-500/50 text-blue-300 rounded-lg hover:bg-blue-500/30 transition-colors text-sm text-center"
+                            className="px-3 py-2 bg-blue-50 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm text-center"
                           >
                             Edit
                           </Link>
@@ -1512,7 +1859,7 @@ export default function BusinessDashboard() {
                                 alert(err.message || 'Failed to cancel job. Please try again.')
                               }
                             }}
-                            className="px-3 py-2 bg-red-500/20 border border-red-500/50 text-red-300 rounded-lg hover:bg-red-500/30 transition-colors text-sm text-center"
+                            className="px-3 py-2 bg-red-50 border border-red-200 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm text-center"
                           >
                             Cancel
                           </button>
@@ -1524,13 +1871,13 @@ export default function BusinessDashboard() {
               </div>
             ) : (
               <div className="text-center py-12">
-                <p className="text-gray-300 font-medium mb-2">No vacancies yet</p>
+                <p className="text-gray-700 font-medium mb-2">No vacancies yet</p>
                 <p className="text-gray-500 text-sm mb-5">
                   Post your first job vacancy so talent can discover it.
                 </p>
                 <Link
                   href="/dashboard/business/jobs/create"
-                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  className="inline-block px-6 py-3 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors"
                 >
                   Post a Job
                 </Link>
@@ -1541,28 +1888,28 @@ export default function BusinessDashboard() {
 
         {activeTab === 'applications' && (
           <div className="dashboard-card rounded-xl p-6">
-            <h2 className="text-2xl font-bold text-white mb-6">Job Applications</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Job Applications</h2>
             {applications.length > 0 ? (
               <div className="space-y-4">
                 {applications.map((app) => (
-                  <div key={app.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
+                  <div key={app.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-white mb-1">{app.job_title || 'Job'}</h3>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-1">{app.job_title || 'Job'}</h3>
                         {app.job_location && (
-                          <p className="text-gray-400 text-sm mb-2">📍 {app.job_location}</p>
+                          <p className="text-gray-600 text-sm mb-2">📍 {app.job_location}</p>
                         )}
                         <p className="text-gray-500 text-sm">
                           Applied: {new Date(app.created_at).toLocaleDateString()}
                         </p>
                       </div>
                       <div className="ml-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          app.status === 'applied' ? 'bg-blue-500/20 text-blue-400' :
-                          app.status === 'shortlisted' ? 'bg-green-500/20 text-green-400' :
-                          app.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
-                          app.status === 'hired' ? 'bg-purple-500/20 text-purple-400' :
-                          'bg-gray-500/20 text-gray-400'
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${
+                          app.status === 'applied' ? 'bg-blue-50 text-blue-600 border-blue-200' :
+                          app.status === 'shortlisted' ? 'bg-green-50 text-green-600 border-green-200' :
+                          app.status === 'rejected' ? 'bg-red-50 text-red-600 border-red-200' :
+                          app.status === 'hired' ? 'bg-purple-50 text-purple-600 border-purple-200' :
+                          'bg-gray-50 text-gray-600 border-gray-200'
                         }`}>
                           {app.status.charAt(0).toUpperCase() + app.status.slice(1)}
                         </span>
@@ -1573,10 +1920,10 @@ export default function BusinessDashboard() {
               </div>
             ) : (
               <div className="text-center py-12">
-                <p className="text-gray-400 mb-4">No applications yet</p>
+                <p className="text-gray-600 mb-4">No applications yet</p>
                 <Link
                   href="/dashboard/business/jobs/create"
-                  className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                  className="inline-block px-6 py-3 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors"
                 >
                   Post Job
                 </Link>
@@ -1589,22 +1936,22 @@ export default function BusinessDashboard() {
           <div className="dashboard-card rounded-xl p-6">
             <div className="flex items-start justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-white">Connections</h2>
-                <p className="text-gray-400 text-sm">
+                <h2 className="text-2xl font-bold text-gray-900">Talent Connections</h2>
+                <p className="text-gray-600 text-sm">
                   Manage connection requests from talent. Messaging unlocks only after acceptance.
                 </p>
               </div>
               <div className="flex items-center gap-2">
               <button
                 onClick={() => loadConnections()}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+                className="px-4 py-2 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors disabled:opacity-60"
                 disabled={connLoading}
               >
                 Refresh connections
               </button>
                 <button
                   onClick={() => loadConsentRequests()}
-                  className="px-4 py-2 bg-white/5 border border-white/10 text-gray-200 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-60"
+                  className="px-4 py-2 bg-gray-100 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-60"
                   disabled={consentLoading}
                 >
                   Refresh consent
@@ -1613,44 +1960,44 @@ export default function BusinessDashboard() {
             </div>
 
             {connError && (
-              <div className="mb-4 border border-red-500/30 bg-red-500/10 text-red-200 rounded-lg p-4">
+              <div className="mb-4 border border-red-300 bg-red-50 text-red-700 rounded-lg p-4">
                 {connError}
               </div>
             )}
 
             <div className="grid md:grid-cols-2 gap-6">
-              <div className="border border-gray-800 rounded-lg p-4">
-                <h3 className="text-white font-semibold mb-3">Print / export consent requests</h3>
+              <div className="border border-gray-200 rounded-lg p-4">
+                <h3 className="text-gray-900 font-semibold mb-3">Print / export consent requests</h3>
                 <p className="text-gray-500 text-xs mb-3">
                   Talent cannot print/export your content via in-app controls unless you approve here. Screenshots can't be fully prevented on the web, but we record consent decisions.
                 </p>
                 {consentError ? (
-                  <div className="mb-3 border border-red-500/30 bg-red-500/10 text-red-200 rounded-lg p-3 text-sm">
+                  <div className="mb-3 border border-red-300 bg-red-50 text-red-700 rounded-lg p-3 text-sm">
                     {consentError}
                   </div>
                 ) : null}
                 {consentLoading ? (
-                  <p className="text-gray-400">Loading consent requests…</p>
+                  <p className="text-gray-600">Loading consent requests…</p>
                 ) : (
                   <>
                     {consentReqs.filter((r) => r.status === 'pending').length === 0 ? (
-                      <p className="text-gray-400">No pending consent requests.</p>
+                      <p className="text-gray-600">No pending consent requests.</p>
                     ) : (
                       <div className="space-y-3">
                         {consentReqs
                           .filter((r) => r.status === 'pending')
                           .map((r) => (
-                            <div key={r.id} className="border border-gray-800 rounded-lg p-3">
-                              <p className="text-gray-200 text-sm font-medium">
+                            <div key={r.id} className="border border-gray-200 rounded-lg p-3">
+                              <p className="text-gray-900 text-sm font-medium">
                               {r.talent_name && r.talent_name.trim() ? (
                                 r.talent_name
                               ) : (
-                                <span className="text-yellow-400 italic animate-pulse">Loading name...</span>
+                                <span className="text-yellow-600 italic animate-pulse">Loading name...</span>
                               )}
                             </p>
                               <p className="text-gray-500 text-xs mt-1">Requested {new Date(r.requested_at).toLocaleString()}</p>
                               {r.request_reason ? (
-                                <p className="text-gray-300 text-sm mt-2 whitespace-pre-wrap">{r.request_reason}</p>
+                                <p className="text-gray-700 text-sm mt-2 whitespace-pre-wrap">{r.request_reason}</p>
                               ) : (
                                 <p className="text-gray-500 text-sm mt-2">No reason provided.</p>
                               )}
@@ -1659,7 +2006,7 @@ export default function BusinessDashboard() {
                                   type="button"
                                   disabled={consentBusyId === r.id}
                                   onClick={() => respondConsent(r, 'approved')}
-                                  className="px-3 py-1.5 rounded-lg bg-green-500/20 border border-green-500/40 text-green-200 hover:bg-green-500/25 disabled:opacity-60"
+                                  className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 disabled:opacity-60"
                                 >
                                   Approve
                                 </button>
@@ -1667,7 +2014,7 @@ export default function BusinessDashboard() {
                                   type="button"
                                   disabled={consentBusyId === r.id}
                                   onClick={() => respondConsent(r, 'denied')}
-                                  className="px-3 py-1.5 rounded-lg bg-red-500/15 border border-red-500/40 text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+                                  className="px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 disabled:opacity-60"
                                 >
                                   Deny
                                 </button>
@@ -1680,34 +2027,223 @@ export default function BusinessDashboard() {
                 )}
               </div>
 
-              <div className="border border-gray-800 rounded-lg p-4">
-                <h3 className="text-white font-semibold mb-3">Connection Requests</h3>
+              {/* Reconnection Requests from Previous Connections */}
+              {reconnectRequests.length > 0 && (
+                <div className="border-2 border-amber-400 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 md:col-span-2">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
+                    <h3 className="text-amber-900 font-semibold">Reconnection Requests</h3>
+                    <span className="ml-2 px-2 py-0.5 bg-amber-500 text-white text-xs rounded-full">
+                      {reconnectRequests.length} pending
+                    </span>
+                  </div>
+                  <p className="text-amber-800 text-xs mb-4">
+                    These talents were previously connected with you and are requesting to reconnect.
+                    Accepting will restore the connection along with all previous messages and video chat history.
+                  </p>
+                  <div className="space-y-3">
+                    {reconnectRequests.map((notif) => (
+                      <div
+                        key={notif.id}
+                        className="bg-white border border-amber-200 rounded-lg p-4 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <p className="text-gray-900 font-medium">{notif.talent_name}</p>
+                            <p className="text-gray-600 text-sm mt-1">{notif.message}</p>
+                            <p className="text-amber-600 text-xs mt-2">
+                              Requested {new Date(notif.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => acceptReconnect(notif)}
+                              disabled={acceptingReconnect === notif.id}
+                              className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg font-semibold transition-colors disabled:opacity-60"
+                            >
+                              {acceptingReconnect === notif.id ? 'Accepting...' : 'Accept & Restore'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => router.push(`/portfolio/view?talent_id=${notif.talent_id}&request_id=${notif.connection_request_id}`)}
+                              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-lg transition-colors"
+                            >
+                              View Profile
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Connection Requests FROM Talent - Full portfolio access */}
+              <div className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <h3 className="text-gray-900 font-semibold">Connection Requests from Talent</h3>
+                </div>
+                <p className="text-gray-500 text-xs mb-3">
+                  Talents who reached out to connect with you. View their full shared portfolio.
+                </p>
                 {connLoading ? (
-                  <p className="text-gray-400">Loading connections…</p>
-                ) : connRequests.length === 0 ? (
-                  <p className="text-gray-400">No connection requests yet.</p>
+                  <p className="text-gray-600">Loading connections…</p>
+                ) : connRequestsFromTalent.length === 0 ? (
+                  <p className="text-gray-600">No requests from talents yet.</p>
                 ) : (
                   <div className="space-y-3">
-                    {connRequests.map((r) => (
+                    {connRequestsFromTalent.map((r) => (
                       <Link
                         key={r.id}
                         href={`/portfolio/view?talent_id=${r.talent_id}&request_id=${r.id}`}
-                        className="block border border-gray-800 rounded-lg p-3 hover:border-blue-500/50 hover:bg-slate-800/50 transition-all cursor-pointer"
+                        className="block border border-green-200 bg-green-50/30 rounded-lg p-3 hover:border-green-400 hover:bg-green-50 transition-all cursor-pointer"
                       >
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-gray-200 text-sm font-medium">Pending request</p>
-                            <p className="text-gray-500 text-xs mt-1">
-                              Sent {new Date(r.created_at).toLocaleString()}
+                            <p className="text-gray-900 text-sm font-medium">
+                              {r.talent_name || 'Talent'}
                             </p>
+                            <p className="text-gray-500 text-xs mt-1">
+                              Requested {new Date(r.created_at).toLocaleString()}
+                            </p>
+                            {r.selected_sections && Array.isArray(r.selected_sections) && r.selected_sections.length > 0 && (
+                              <p className="text-green-600 text-xs mt-1">
+                                Sharing: {r.selected_sections.slice(0, 3).join(', ')}{r.selected_sections.length > 3 ? '...' : ''}
+                              </p>
+                            )}
                           </div>
-                          <span className="text-blue-400 text-sm">View Profile →</span>
+                          <span className="text-green-600 text-sm font-medium">View Full Portfolio →</span>
                         </div>
                       </Link>
                     ))}
                   </div>
                 )}
               </div>
+
+              {/* Connection Requests FROM Business - Only profile summary access */}
+              <div className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <h3 className="text-gray-900 font-semibold">Your Outreach Requests</h3>
+                </div>
+                <p className="text-gray-500 text-xs mb-3">
+                  Talents you reached out to via search. You can only view their public profile summary until they accept.
+                </p>
+                {connLoading ? (
+                  <p className="text-gray-600">Loading connections…</p>
+                ) : connRequestsFromBusiness.length === 0 ? (
+                  <p className="text-gray-600">No outreach requests pending.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {connRequestsFromBusiness.map((r) => (
+                      <div
+                        key={r.id}
+                        className="border border-blue-200 bg-blue-50/30 rounded-lg p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-gray-900 text-sm font-medium">
+                              {r.talent_name || 'Talent'}
+                            </p>
+                            <p className="text-gray-500 text-xs mt-1">
+                              Requested {new Date(r.created_at).toLocaleString()}
+                            </p>
+                            <p className="text-blue-600 text-xs mt-1">
+                              Awaiting talent's response
+                            </p>
+                          </div>
+                          <span className="text-blue-500 text-xs px-2 py-1 bg-blue-100 rounded">Pending</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Reconnection Requests - Show based on who initiated */}
+              {connReconnectRequests.length > 0 && (
+                <div className="border-2 border-amber-400 bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 md:col-span-2">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
+                    <h3 className="text-amber-900 font-semibold">Reconnection Requests</h3>
+                    <span className="ml-2 px-2 py-0.5 bg-amber-500 text-white text-xs rounded-full">
+                      {connReconnectRequests.length} pending
+                    </span>
+                  </div>
+                  <p className="text-amber-800 text-xs mb-4">
+                    These are requests to reconnect from previous connections. If the talent initiated, you can view their full portfolio and message history.
+                  </p>
+                  <div className="space-y-3">
+                    {connReconnectRequests.map((r) => {
+                      const isFromTalent = r.reconnect_requested_by === 'talent'
+                      return (
+                        <div
+                          key={r.id}
+                          className="bg-white border border-amber-200 rounded-lg p-4 shadow-sm"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-gray-900 font-medium">{r.talent_name || 'Talent'}</p>
+                                <span className={`text-xs px-2 py-0.5 rounded ${isFromTalent ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {isFromTalent ? 'Talent requested' : 'You requested'}
+                                </span>
+                              </div>
+                              {r.reconnect_message && (
+                                <p className="text-gray-600 text-sm mt-2 italic">"{r.reconnect_message}"</p>
+                              )}
+                              <p className="text-amber-600 text-xs mt-2">
+                                Requested {new Date(r.responded_at || r.created_at).toLocaleString()}
+                              </p>
+                              {isFromTalent && r.selected_sections && Array.isArray(r.selected_sections) && r.selected_sections.length > 0 && (
+                                <p className="text-green-600 text-xs mt-1">
+                                  Will share: {r.selected_sections.join(', ')}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {isFromTalent ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!confirm('Accept this reconnection request? This will restore the connection and all previous message history.')) return
+                                      try {
+                                        const { error } = await supabase
+                                          .from('talent_connection_requests')
+                                          .update({ status: 'accepted', responded_at: new Date().toISOString() })
+                                          .eq('id', r.id)
+                                        if (error) throw error
+                                        alert('Connection restored! You can now message this talent and view their portfolio.')
+                                        loadConnections()
+                                      } catch (err: any) {
+                                        alert(err.message || 'Failed to accept reconnection')
+                                      }
+                                    }}
+                                    className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg font-semibold transition-colors"
+                                  >
+                                    Accept & Restore
+                                  </button>
+                                  <Link
+                                    href={`/portfolio/view?talent_id=${r.talent_id}&request_id=${r.id}&reconnect=true`}
+                                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-lg text-center transition-colors"
+                                  >
+                                    View Portfolio & History
+                                  </Link>
+                                </>
+                              ) : (
+                                <span className="text-amber-600 text-sm">Awaiting talent's response</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Declined Connection Requests */}
               {connDeclined.length > 0 && (
@@ -1907,10 +2443,85 @@ export default function BusinessDashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Previous Connections - Talents who withdrew their connection */}
+              {connWithdrawn.length > 0 && (
+                <div className="border border-gray-800 rounded-lg p-4 md:col-span-2 bg-gradient-to-br from-slate-900/50 to-amber-900/10">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                    <h3 className="text-white font-semibold">Previous Connections</h3>
+                    <span className="text-amber-400/80 text-xs ml-2">({connWithdrawn.length} withdrawn)</span>
+                  </div>
+                  <p className="text-gray-400 text-xs mb-4">
+                    These talents previously connected with you but the connection has ended. You can request to reconnect by sending them a message.
+                  </p>
+                  <div className="space-y-3">
+                    {connWithdrawn.map((r) => {
+                      const withdrawnAt = r.responded_at ? new Date(r.responded_at) : new Date(r.created_at)
+
+                      return (
+                        <div
+                          key={r.id}
+                          className="border border-amber-800/30 bg-amber-900/10 rounded-lg p-3 hover:border-amber-600/50 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="text-gray-200 text-sm font-medium">
+                                {r.talent_name && r.talent_name.trim() ? (
+                                  r.talent_name
+                                ) : (
+                                  <span className="text-yellow-400 italic animate-pulse">Loading name...</span>
+                                )}
+                              </p>
+                              <p className="text-gray-500 text-xs mt-1">
+                                Originally connected {r.created_at ? new Date(r.created_at).toLocaleDateString() : '—'}
+                              </p>
+                              <p className="text-amber-400/70 text-xs mt-0.5">
+                                Connection ended {withdrawnAt.toLocaleDateString()}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const businessName = businessProfile?.business_name || businessProfile?.name || 'Our business'
+                                  setReconnectModal({
+                                    open: true,
+                                    connection: r,
+                                    message: `Hi ${r.talent_name || 'there'},\n\n${businessName} would like to reconnect with you. We may have new opportunities that could be a great fit for your skills and experience.\n\nWould you be interested in reconnecting?`
+                                  })
+                                }}
+                                disabled={sendingOpportunity === r.id}
+                                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg font-semibold transition-colors disabled:opacity-60"
+                              >
+                                Request Reconnect
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConnectionSummaryModal({
+                                    open: true,
+                                    connection: r
+                                  })
+                                }}
+                                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg font-semibold transition-colors"
+                              >
+                                View Summary
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Messaging UI - shown when a talent is selected */}
-            {msgSelectedTalentId && (
+            {msgSelectedTalentId && !isServiceConnections && (
               <div className="mt-6 border border-gray-800 rounded-lg overflow-hidden">
                 <div className="px-4 py-3 bg-gray-900/40 border-b border-gray-800 flex items-center justify-between">
                   <p className="text-gray-300 font-medium">
@@ -2003,6 +2614,154 @@ export default function BusinessDashboard() {
 
           </div>
         )}
+
+        {activeTab === 'service_connections' && (
+          <div className="dashboard-card rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Business Connections</h2>
+                <p className="text-gray-600 text-sm">
+                  Conversations with talent who want your commercial services. No acceptance required.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => loadServiceConnections()}
+                  className="px-4 py-2 bg-[#20C997] text-white rounded-lg hover:bg-[#1DB886] transition-colors disabled:opacity-60"
+                  disabled={serviceLoading}
+                >
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            {serviceError && (
+              <div className="mb-4 border border-red-300 bg-red-50 text-red-700 rounded-lg p-4">
+                {serviceError}
+              </div>
+            )}
+
+            {serviceLoading ? (
+              <p className="text-gray-600">Loading business conversations…</p>
+            ) : serviceConnections.length === 0 ? (
+              <p className="text-gray-600">No business conversations yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {serviceConnections.map((c) => (
+                  <div key={c.conversation_id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <p className="text-gray-900 font-semibold">{c.talent_name}</p>
+                        <p className="text-gray-600 text-xs mt-1">{c.last_message || 'No message preview available.'}</p>
+                        <p className="text-gray-500 text-xs mt-1">{new Date(c.last_at).toLocaleString()}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            setMsgSelectedTalentId(c.talent_id)
+                            await loadConversation(c.talent_id)
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg font-semibold transition-colors"
+                        >
+                          Message
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Messaging UI - shown when a talent is selected */}
+            {msgSelectedTalentId && (
+              <div className="mt-6 border border-gray-200 rounded-lg overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                  <p className="text-gray-900 font-medium">
+                    {(() => {
+                      const match = serviceConnections.find((c) => String(c.talent_id) === String(msgSelectedTalentId))
+                      const name = match?.talent_name || msgTalents.find((t) => String(t.id) === String(msgSelectedTalentId))?.name || 'Talent'
+                      return `Conversation with ${name}`
+                    })()}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setMsgSelectedTalentId(null)
+                      setMsgConversationId(null)
+                      setMsgItems([])
+                    }}
+                    className="text-gray-600 hover:text-gray-900 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {msgError && (
+                  <div className="p-4 border-b border-gray-200 bg-red-50 text-red-700 text-sm">
+                    {msgError}
+                  </div>
+                )}
+
+                {msgLoading && (
+                  <div className="p-6 text-center">
+                    <p className="text-gray-600">Loading messages…</p>
+                  </div>
+                )}
+
+                {!msgLoading && msgConversationId === null && !msgError && (
+                  <div className="p-6 text-center">
+                    <p className="text-gray-700 mb-2">No messages yet</p>
+                    <p className="text-gray-500 text-sm">Start the conversation by sending a message below.</p>
+                  </div>
+                )}
+
+                {!msgLoading && msgConversationId && (
+                  <div className="p-4 space-y-3 max-h-[300px] overflow-auto bg-gray-50">
+                    {msgItems.length === 0 ? (
+                      <p className="text-gray-600 text-center">No messages yet.</p>
+                    ) : (
+                      msgItems.map((m) => (
+                        <div
+                          key={m.id}
+                          className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                            m.sender_type === 'business'
+                              ? 'ml-auto bg-blue-100 border border-blue-200 text-blue-900'
+                              : 'mr-auto bg-gray-100 border border-gray-200 text-gray-900'
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap">{m.body}</p>
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            {new Date(m.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {msgSelectedTalentId && (
+                  <div className="p-4 border-t border-gray-200 bg-gray-50">
+                    <div className="flex items-end gap-3">
+                      <textarea
+                        value={msgBody}
+                        onChange={(e) => setMsgBody(e.target.value)}
+                        placeholder="Write a message…"
+                        className="flex-1 min-h-[80px] border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={sendMessage}
+                        disabled={msgLoading || !msgBody.trim()}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       {/* Video Chat Modal */}
@@ -2032,6 +2791,211 @@ export default function BusinessDashboard() {
             >
               ✕
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reconnection Request Modal */}
+      {reconnectModal.open && reconnectModal.connection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Request to Reconnect</h2>
+              <button
+                type="button"
+                onClick={() => setReconnectModal({ open: false, connection: null, message: '' })}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-gray-600 text-sm mb-4">
+              Send a message to <strong>{reconnectModal.connection.talent_name || 'this talent'}</strong> requesting to reconnect.
+              If they accept, your previous conversation history will be restored.
+            </p>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Your message
+              </label>
+              <textarea
+                value={reconnectModal.message}
+                onChange={(e) => setReconnectModal(prev => ({ ...prev, message: e.target.value }))}
+                rows={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-gray-900"
+                placeholder="Write a message explaining why you'd like to reconnect..."
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setReconnectModal({ open: false, connection: null, message: '' })}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={sendingOpportunity === reconnectModal.connection.id || !reconnectModal.message.trim()}
+                onClick={async () => {
+                  const conn = reconnectModal.connection
+                  if (!conn) return
+                  setSendingOpportunity(conn.id)
+                  try {
+                    // Update the connection request status to 'pending' (reconnection requested)
+                    // and store the reconnection message in metadata or a separate field
+                    const { error: updateError } = await supabase
+                      .from('talent_connection_requests')
+                      .update({
+                        status: 'pending',
+                        responded_at: new Date().toISOString()
+                      })
+                      .eq('id', conn.id)
+
+                    if (updateError) {
+                      throw new Error(updateError.message || 'Failed to send reconnection request')
+                    }
+
+                    // Try to create a notification for the talent (if table exists)
+                    try {
+                      await supabase
+                        .from('talent_notifications')
+                        .insert({
+                          talent_id: conn.talent_id,
+                          business_id: businessProfile?.id,
+                          connection_request_id: conn.id,
+                          notification_type: 'reconnect_request',
+                          title: `Reconnection Request from ${businessProfile?.business_name || businessProfile?.name || 'A business'}`,
+                          message: reconnectModal.message,
+                          metadata: {
+                            business_name: businessProfile?.business_name || businessProfile?.name,
+                            original_connection_date: conn.created_at
+                          }
+                        })
+                    } catch (notifErr) {
+                      // Notification table may not exist - that's okay, the status update is the main action
+                      console.log('[Reconnect] Could not create notification, table may not exist')
+                    }
+
+                    alert('Reconnection request sent! The talent will see your request and can accept to restore the connection.')
+                    setReconnectModal({ open: false, connection: null, message: '' })
+                    // Reload connections to reflect the status change
+                    await loadConnections()
+                  } catch (err: any) {
+                    console.error('Error sending reconnection request:', err)
+                    alert(err.message || 'Failed to send reconnection request. Please try again.')
+                  } finally {
+                    setSendingOpportunity(null)
+                  }
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition-colors disabled:opacity-60"
+              >
+                {sendingOpportunity === reconnectModal.connection.id ? 'Sending...' : 'Send Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Connection Summary Modal */}
+      {connectionSummaryModal.open && connectionSummaryModal.connection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Previous Connection Summary</h2>
+              <button
+                type="button"
+                onClick={() => setConnectionSummaryModal({ open: false, connection: null })}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-amber-800 text-sm">
+                  This connection has ended. Full profile details are no longer available.
+                  You can request to reconnect to restore access.
+                </p>
+              </div>
+
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Talent Name</p>
+                  <p className="text-gray-900 font-medium">
+                    {connectionSummaryModal.connection.talent_name || 'Name not available'}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Originally Connected</p>
+                  <p className="text-gray-900">
+                    {connectionSummaryModal.connection.created_at
+                      ? new Date(connectionSummaryModal.connection.created_at).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })
+                      : 'Date not available'}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Connection Ended</p>
+                  <p className="text-gray-900">
+                    {connectionSummaryModal.connection.responded_at
+                      ? new Date(connectionSummaryModal.connection.responded_at).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })
+                      : 'Date not available'}
+                  </p>
+                </div>
+
+                {connectionSummaryModal.connection.selected_sections &&
+                  Array.isArray(connectionSummaryModal.connection.selected_sections) &&
+                  connectionSummaryModal.connection.selected_sections.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide">Previously Shared Sections</p>
+                      <p className="text-gray-700 text-sm">
+                        {connectionSummaryModal.connection.selected_sections.join(', ')}
+                      </p>
+                    </div>
+                  )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setConnectionSummaryModal({ open: false, connection: null })}
+                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const conn = connectionSummaryModal.connection
+                  setConnectionSummaryModal({ open: false, connection: null })
+                  if (conn) {
+                    const businessName = businessProfile?.business_name || businessProfile?.name || 'Our business'
+                    setReconnectModal({
+                      open: true,
+                      connection: conn,
+                      message: `Hi ${conn.talent_name || 'there'},\n\n${businessName} would like to reconnect with you. We may have new opportunities that could be a great fit for your skills and experience.\n\nWould you be interested in reconnecting?`
+                    })
+                  }
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold transition-colors"
+              >
+                Request Reconnect
+              </button>
+            </div>
           </div>
         </div>
       )}

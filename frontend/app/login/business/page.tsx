@@ -1,27 +1,41 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 export default function BusinessLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <BusinessLoginPageInner />
+    </Suspense>
+  )
+}
+
+function BusinessLoginPageInner() {
   const router = useRouter()
   const params = useSearchParams()
   const redirectTo = params.get('redirect') || '/dashboard/business'
   const initialMode = params.get('mode')
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  // Initialize mode from URL params - default to signup if mode=signup is in URL
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode === 'signup' ? 'signup' : 'signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (initialMode === 'signup') setMode('signup')
-    if (initialMode === 'signin') setMode('signin')
+    // Ensure mode matches URL parameter
+    if (initialMode === 'signup') {
+      setMode('signup')
+    } else if (initialMode === 'signin') {
+      setMode('signin')
+    }
+    // If no mode parameter, keep current state (or default to signin)
     try {
       localStorage.setItem('creerlio_active_role', 'business')
       localStorage.setItem('user_type', 'business')
@@ -35,7 +49,7 @@ export default function BusinessLoginPage() {
     }).catch(() => {})
   }, [router, redirectTo, initialMode])
 
-  async function submit(e: React.FormEvent) {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
@@ -84,32 +98,24 @@ export default function BusinessLoginPage() {
           const hasBusinessProfile = !!businessCheck.data && !businessCheck.error
           const hasTalentProfile = !!talentCheck.data && !talentCheck.error
           
-          // Check both localStorage AND user metadata for registration intent
-          const registeredAsTalent = wasRegisteredAsTalent || registeredAsTalentFromMetadata
-          
-          // If user has BOTH profiles, check creation timestamps to determine most recent registration
-          let talentCreatedAfterBusiness = false
-          if (hasBusinessProfile && hasTalentProfile && businessCheck.data?.created_at && talentCheck.data?.created_at) {
-            talentCreatedAfterBusiness = new Date(talentCheck.data.created_at) > new Date(businessCheck.data.created_at)
-          }
-          
           // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/business/page.tsx:signin:validate_result',message:'Profile validation result',data:{userId,hasBusinessProfile,hasTalentProfile,wasRegisteredAsTalent,registeredAsTalentFromMetadata,registeredAsTalent,talentCreatedAfterBusiness,willBlock:(hasTalentProfile && !hasBusinessProfile) || registeredAsTalent || (talentCreatedAfterBusiness && hasBusinessProfile && hasTalentProfile)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN_VALIDATE'})}).catch(()=>{});
+          fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/business/page.tsx:signin:validate_result',message:'Profile validation result',data:{userId,hasBusinessProfile,hasTalentProfile,wasRegisteredAsTalent,registeredAsTalentFromMetadata,businessCreatedAt:businessCheck.data?.created_at,talentCreatedAt:talentCheck.data?.created_at},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN_VALIDATE'})}).catch(()=>{});
           // #endregion
           
-          // CRITICAL RULE: Block business login if:
-          // 1. User has talent profile but no business profile, OR
-          // 2. User registered as talent (from metadata or localStorage) - even if they have both profiles, OR
-          // 3. User has both profiles but talent profile was created AFTER business profile (most recent registration was as talent)
-          if ((hasTalentProfile && !hasBusinessProfile) || registeredAsTalent || (talentCreatedAfterBusiness && hasBusinessProfile && hasTalentProfile)) {
+          // CRITICAL RULE: Allow business login if user has a business profile
+          // Only block if user ONLY has a talent profile (no business profile exists)
+          // If user has both profiles, prioritize business profile - allow business login
+          if (!hasBusinessProfile && hasTalentProfile) {
             setError('This email is registered as a Talent account. Please use the Talent login page.')
             // Sign out the user since they're on the wrong login page
             await supabase.auth.signOut()
             // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/business/page.tsx:signin:blocked',message:'Blocked talent user from business login',data:{userId,email:email.trim(),hasTalentProfile,hasBusinessProfile},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN_VALIDATE'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'login/business/page.tsx:signin:blocked',message:'Blocked - user only has talent profile',data:{userId,email:email.trim(),hasTalentProfile,hasBusinessProfile},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'LOGIN_VALIDATE'})}).catch(()=>{});
             // #endregion
             return
           }
+          
+          // If user has business profile, allow login regardless of talent profile existence
         }
         
         // Only update metadata AFTER validation passes - this records that they successfully signed in as business
@@ -158,16 +164,56 @@ export default function BusinessLoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-6">
-      <div className="w-full max-w-md dashboard-card rounded-xl p-8 border border-white/10">
-        <div className="flex items-center justify-between mb-6">
-          <Link href="/" className="text-white text-xl font-bold hover:text-green-400 transition-colors">
-            Creerlio
-          </Link>
-          <Link href="/login/talent" className="text-slate-300 hover:text-blue-400 transition-colors text-sm">
-            I’m Talent →
-          </Link>
+    <div className="min-h-screen bg-white">
+      {/* Public Header */}
+      <header className="sticky top-0 z-50 bg-black border-0">
+        <div className="max-w-7xl mx-auto px-8 py-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-[#20C997] transition-colors">
+              Creerlio
+            </Link>
+
+            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-white">
+              <Link href="/about" className="hover:text-[#20C997] transition-colors">About</Link>
+              <Link href="/#talent" className="hover:text-[#20C997] transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-[#20C997] transition-colors">Business</Link>
+              <Link href="/search" className="hover:text-[#20C997] transition-colors">Search</Link>
+              <Link href="/jobs" className="hover:text-[#20C997] transition-colors">Jobs</Link>
+            </nav>
+
+            <div className="flex gap-3">
+              <Link
+                href="/login/talent?mode=signup&redirect=/dashboard/talent"
+                className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Create Talent Account
+              </Link>
+              <Link
+                href="/login/business?mode=signup&redirect=/dashboard/business"
+                className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Create Business Account
+              </Link>
+              <Link
+                href="/login/talent?mode=signin&redirect=/dashboard/talent"
+                className="px-5 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Sign In
+              </Link>
+            </div>
+          </div>
         </div>
+      </header>
+
+      {/* Login Form Section */}
+      <div className="min-h-[calc(100vh-80px)] bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-6">
+        <div className="w-full max-w-md dashboard-card rounded-xl p-8 border border-white/10">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-xl font-bold text-white">{mode === 'signin' ? 'Business Sign In' : 'Create Business Account'}</h1>
+            <Link href="/login/talent" className="text-slate-300 hover:text-blue-400 transition-colors text-sm">
+              I'm Talent →
+            </Link>
+          </div>
 
         <h1 className="text-2xl font-bold text-white mb-2">{mode === 'signin' ? 'Business sign in' : 'Create Business account'}</h1>
         <p className="text-gray-400 text-sm mb-6">Business sign-in uses your business email.</p>
@@ -230,8 +276,9 @@ export default function BusinessLoginPage() {
             {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
         </form>
+          </div>
+        </div>
       </div>
-    </div>
   )
 }
 

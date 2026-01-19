@@ -25,13 +25,17 @@ export interface BusinessFeature {
     lng: number
     sizeBand?: string
     openness?: string
+    intentStatus?: string | null
+    intentVisible?: boolean
   }
 }
 
 export interface RouteState {
   to?: { label: string; lat: number; lng: number }
   drivingMins?: number
+  drivingKm?: number
   cyclingMins?: number
+  cyclingKm?: number
   busy: boolean
   error?: string
 }
@@ -67,6 +71,10 @@ interface BusinessDiscoveryMapProps {
   onRouteStateChange: (state: RouteState | null) => void
   onRouteQueryChange: (query: string) => void
   externalRouteQuery: string
+  triggerResize?: number
+  intentStatus?: string
+  intentCompatibility?: boolean
+  fitBounds?: [[number, number], [number, number]] | null
 }
 
 const mapStyles: Record<string, string> = {
@@ -76,11 +84,21 @@ const mapStyles: Record<string, string> = {
   streets: 'mapbox://styles/mapbox/streets-v12',
 }
 
+const DEBUG_ENDPOINT = 'http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc'
+const emitDebugLog = (payload: Record<string, unknown>) => {
+  fetch(DEBUG_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+  fetch('/api/debug-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+}
+
 export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<any>(null)
   const markersRef = useRef<any[]>([])
   const pointBMarkerRef = useRef<any>(null)
+  const routeBoundsRef = useRef<any>(null)
+  const routeGeoRef = useRef<any>(null)
+  const routePointARef = useRef<[number, number] | null>(null)
+  const routePointBRef = useRef<[number, number] | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [businesses, setBusinesses] = useState<BusinessFeature[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -122,6 +140,57 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
     }
   }, [])
 
+  // Handle resize when container size changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+    // Small delay to ensure DOM has updated
+    const timer = setTimeout(() => {
+      const container = map.current?.getContainer?.()
+      const width = container?.clientWidth
+      const height = container?.clientHeight
+      // #region agent log
+      emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1',location:'BusinessDiscoveryMap.tsx:resize',message:'map resize',data:{triggerResize:props.triggerResize,mapLoaded,container:{width,height}},timestamp:Date.now()})
+      // #endregion
+      map.current?.resize()
+      const hasRouteSource = !!map.current?.getSource?.('route-source')
+      const bounds = map.current?.getBounds?.()
+      // #region agent log
+      emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H2',location:'BusinessDiscoveryMap.tsx:resize',message:'post-resize state',data:{hasRouteSource,bounds:bounds?.toArray?.()},timestamp:Date.now()})
+      // #endregion
+      if (routeBoundsRef.current && map.current?.fitBounds) {
+        // #region agent log
+        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1',location:'BusinessDiscoveryMap.tsx:resize',message:'reapply route bounds after resize',data:{bounds:routeBoundsRef.current.toArray?.()},timestamp:Date.now()})
+        // #endregion
+        map.current.fitBounds(routeBoundsRef.current, {
+          padding: { top: 120, bottom: 120, left: 120, right: 120 },
+          maxZoom: 13,
+          duration: 600,
+        })
+      }
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [props.triggerResize, mapLoaded])
+
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !mapContainer.current) return
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      map.current?.resize()
+      if (routeBoundsRef.current && map.current?.fitBounds) {
+        // #region agent log
+        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1',location:'BusinessDiscoveryMap.tsx:resize-observer',message:'resize observer reapply route bounds',data:{bounds:routeBoundsRef.current.toArray?.()},timestamp:Date.now()})
+        // #endregion
+        map.current.fitBounds(routeBoundsRef.current, {
+          padding: { top: 120, bottom: 120, left: 120, right: 120 },
+          maxZoom: 13,
+          duration: 600,
+        })
+      }
+    })
+    observer.observe(mapContainer.current)
+    return () => observer.disconnect()
+  }, [mapLoaded])
+
   // Handle map style changes
   useEffect(() => {
     if (map.current && mapLoaded && props.activeStyle) {
@@ -129,6 +198,44 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
       map.current.once('style.load', () => {
         // Re-render markers after style change
         updateMarkers()
+        if (routeGeoRef.current && map.current) {
+          const routeSourceId = 'route-source'
+          const routeLayerId = 'route-layer'
+          if (map.current.getLayer(routeLayerId)) {
+            map.current.removeLayer(routeLayerId)
+          }
+          if (map.current.getSource(routeSourceId)) {
+            map.current.removeSource(routeSourceId)
+          }
+          map.current.addSource(routeSourceId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: routeGeoRef.current,
+            },
+          })
+          map.current.addLayer({
+            id: routeLayerId,
+            type: 'line',
+            source: routeSourceId,
+            paint: {
+              'line-color': '#10b981',
+              'line-width': 4,
+              'line-opacity': 0.8,
+            },
+          })
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H6',location:'BusinessDiscoveryMap.tsx:style-load',message:'route layer restored after style change',data:{hasRouteGeo:!!routeGeoRef.current,routeBounds:routeBoundsRef.current?.toArray?.()},timestamp:Date.now()})
+          // #endregion
+          if (routeBoundsRef.current) {
+            map.current.fitBounds(routeBoundsRef.current, {
+              padding: { top: 120, bottom: 120, left: 120, right: 120 },
+              maxZoom: 13,
+              duration: 600,
+            })
+          }
+        }
       })
     }
   }, [props.activeStyle, mapLoaded])
@@ -143,6 +250,20 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
       })
     }
   }, [props.flyTo, mapLoaded])
+
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !props.fitBounds) return
+    if (routeBoundsRef.current) return
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H10',location:'BusinessDiscoveryMap.tsx:fit-bounds-prop',message:'fit bounds from parent',data:{bounds:props.fitBounds},timestamp:Date.now()})
+    // #endregion
+    const bounds = new mapboxgl.LngLatBounds(props.fitBounds[0], props.fitBounds[1])
+    map.current.fitBounds(bounds, {
+      padding: { top: 80, bottom: 80, left: 80, right: 80 },
+      maxZoom: 5,
+      duration: 800,
+    })
+  }, [props.fitBounds, mapLoaded])
 
   // Fetch businesses from API
   const fetchBusinesses = useCallback(async () => {
@@ -165,6 +286,8 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
       if (props.filters.industries.length > 0) params.set('industries', props.filters.industries.join(','))
       if (props.filters.work) params.set('work', props.filters.work)
       if (props.showAllBusinesses) params.set('show_all', '1')
+      if (props.intentStatus) params.set('intent_status', props.intentStatus)
+      if (props.intentCompatibility) params.set('intent_compatibility', '1')
       if (props.searchCenter) {
         params.set('lat', String(props.searchCenter.lat))
         params.set('lng', String(props.searchCenter.lng))
@@ -202,6 +325,8 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
             lng: Number(b.lng),
             sizeBand: b.size_band || b.sizeBand,
             openness: b.openness,
+            intentStatus: b.intent_status ?? null,
+            intentVisible: !!b.intent_visibility,
           },
         }))
 
@@ -213,6 +338,8 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         industries: f.properties.industries,
         lng: f.properties.lng,
         lat: f.properties.lat,
+        intent_status: f.properties.intentStatus ?? null,
+        intent_visibility: f.properties.intentVisible ?? false,
       })))
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -229,6 +356,8 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
     props.showAllBusinesses,
     props.searchCenter,
     props.radiusKm,
+    props.intentStatus,
+    props.intentCompatibility,
   ])
 
   // Trigger fetch when filters change
@@ -280,21 +409,26 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)'
 
         // Create popup - independent lifecycle, NOT attached to marker
+        const intentLabel = business.properties.intentVisible && business.properties.intentStatus
+          ? `<div style="font-size: 10px; color: #0f766e; margin-bottom: 4px;">Intent: ${business.properties.intentStatus.replace(/_/g, ' ')}</div>`
+          : ''
+
         const popupContent = `
           <div style="padding: 6px; min-width: 140px;">
             <div style="font-weight: 600; font-size: 13px; margin-bottom: 2px; color: #1e293b;">
               ${business.properties.name}
             </div>
+            ${intentLabel}
             <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">
               ${business.properties.industries.length > 0 ? business.properties.industries[0] : 'Business'}
             </div>
             <a
-              href="/dashboard/business/view?id=${business.properties.id}"
+              href="/dashboard/business/view?id=${business.properties.id}&from=talent-map"
               class="business-profile-link"
               data-id="${business.properties.id}"
               data-slug="${business.properties.slug}"
               style="display: inline-block; padding: 4px 10px; background: #3b82f6; color: white; text-decoration: none; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;"
-              onclick="window.location.href='/dashboard/business/view?id=${business.properties.id}'; return false;"
+              onclick="window.location.href='/dashboard/business/view?id=${business.properties.id}&from=talent-map'; return false;"
             >
               View Profile
             </a>
@@ -330,6 +464,10 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         el.addEventListener('click', (e) => {
           e.preventDefault()
           e.stopPropagation()
+
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5',location:'BusinessDiscoveryMap.tsx:marker-click',message:'marker clicked',data:{businessId:business.properties.id,hasRouteSource:!!map.current?.getSource?.('route-source'),routeBounds:routeBoundsRef.current?.toArray?.(),bounds:map.current?.getBounds?.()?.toArray?.()},timestamp:Date.now()})
+          // #endregion
 
           // Verify marker coordinates haven't changed
           console.log(`[MARKER CLICK] ID: ${business.properties.id}, LngLat:`, marker.getLngLat())
@@ -379,7 +517,13 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
       if (popup) {
         // Show popup for selected business, hide for others
         if (isSelected) {
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5',location:'BusinessDiscoveryMap.tsx:selection-popup',message:'popup add start',data:{businessId:marker._businessId,routeBounds:routeBoundsRef.current?.toArray?.(),bounds:map.current?.getBounds?.()?.toArray?.()},timestamp:Date.now()})
+          // #endregion
           popup.addTo(map.current)
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H5',location:'BusinessDiscoveryMap.tsx:selection-popup',message:'popup add end',data:{businessId:marker._businessId,bounds:map.current?.getBounds?.()?.toArray?.()},timestamp:Date.now()})
+          // #endregion
         } else {
           popup.remove()
         }
@@ -590,6 +734,10 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
   useEffect(() => {
     if (!mapLoaded) return
 
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'BusinessDiscoveryMap.tsx:external-route',message:'external route query change',data:{hasQuery:!!props.externalRouteQuery,queryLength:props.externalRouteQuery?.length ?? 0,selectedBusinessId:props.selectedBusinessId,mapLoaded},timestamp:Date.now()})
+    // #endregion
+
     // If route query is cleared, remove route from map
     if (!props.externalRouteQuery || props.externalRouteQuery.trim() === '') {
       const routeSourceId = 'route-source'
@@ -658,7 +806,9 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         const cyclingData = await cyclingRes.json()
 
         const drivingMins = drivingData.routes?.[0]?.duration ? Math.round(drivingData.routes[0].duration / 60) : undefined
+        const drivingKm = drivingData.routes?.[0]?.distance ? Math.round(drivingData.routes[0].distance / 100) / 10 : undefined // Convert meters to km with 1 decimal
         const cyclingMins = cyclingData.routes?.[0]?.duration ? Math.round(cyclingData.routes[0].duration / 60) : undefined
+        const cyclingKm = cyclingData.routes?.[0]?.distance ? Math.round(cyclingData.routes[0].distance / 100) / 10 : undefined
 
         // Draw the driving route on the map
         if (drivingData.routes?.[0]?.geometry) {
@@ -692,6 +842,9 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
               'line-opacity': 0.8,
             },
           })
+          routeGeoRef.current = drivingData.routes[0].geometry
+          routePointARef.current = [pointA[0], pointA[1]]
+          routePointBRef.current = [lngB, latB]
         }
 
         // Create or update draggable Point B marker
@@ -708,9 +861,58 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         markerEl.style.cursor = 'grab'
         markerEl.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)'
 
+        // Create popup for Point B
+        const shortLabel = pointBLabel.split(',')[0] || 'Point B'
+        const pointBPopup = new mapboxgl.Popup({
+          offset: 25,
+          closeButton: false,
+          closeOnClick: false,
+          className: 'point-b-popup',
+        }).setHTML(`
+          <div style="background: #1e293b; color: white; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; border: 1px solid rgba(255,255,255,0.1);">
+            <div style="color: #ef4444; font-size: 10px; margin-bottom: 2px;">Point B</div>
+            ${shortLabel}
+          </div>
+        `)
+
         const pointBMarker = new mapboxgl.Marker(markerEl, { draggable: true })
           .setLngLat([lngB, latB])
+          .setPopup(pointBPopup)
           .addTo(map.current)
+
+        // Show popup by default
+        pointBMarker.togglePopup()
+
+        // Fit map bounds to show entire route with padding
+        // Use setTimeout to ensure this runs after any other map operations
+        setTimeout(() => {
+          if (!map.current) return
+
+          const bounds = new mapboxgl.LngLatBounds()
+          bounds.extend([pointA[0], pointA[1]]) // Point A (business)
+          bounds.extend([lngB, latB]) // Point B (living location)
+
+          // Also include route geometry points for a better fit
+          if (drivingData.routes?.[0]?.geometry?.coordinates) {
+            drivingData.routes[0].geometry.coordinates.forEach((coord: [number, number]) => {
+              bounds.extend(coord)
+            })
+          }
+
+          const padding = { top: 120, bottom: 120, left: 150, right: 150 }
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H2',location:'BusinessDiscoveryMap.tsx:fitBounds',message:'fitting bounds for route',data:{bounds:bounds.toArray(),padding},timestamp:Date.now()})
+          // #endregion
+          routeBoundsRef.current = bounds
+          map.current.fitBounds(bounds, {
+            padding,
+            maxZoom: 13,
+            duration: 1200,
+          })
+          // #region agent log
+          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H2',location:'BusinessDiscoveryMap.tsx:fitBounds',message:'fitBounds called',data:{padding},timestamp:Date.now()})
+          // #endregion
+        }, 300)
 
         // Recalculate route when marker is dragged
         pointBMarker.on('dragend', async () => {
@@ -733,7 +935,9 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
             const cyclingData = await cyclingRes.json()
 
             const newDrivingMins = drivingData.routes?.[0]?.duration ? Math.round(drivingData.routes[0].duration / 60) : undefined
+            const newDrivingKm = drivingData.routes?.[0]?.distance ? Math.round(drivingData.routes[0].distance / 100) / 10 : undefined
             const newCyclingMins = cyclingData.routes?.[0]?.duration ? Math.round(cyclingData.routes[0].duration / 60) : undefined
+            const newCyclingKm = cyclingData.routes?.[0]?.distance ? Math.round(cyclingData.routes[0].distance / 100) / 10 : undefined
 
             // Update route on map
             if (drivingData.routes?.[0]?.geometry) {
@@ -746,6 +950,9 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
                   geometry: drivingData.routes[0].geometry,
                 })
               }
+              routeGeoRef.current = drivingData.routes[0].geometry
+              routePointARef.current = [pointA[0], pointA[1]]
+              routePointBRef.current = [newLngLat.lng, newLngLat.lat]
             }
 
             // Reverse geocode to get location name
@@ -754,10 +961,50 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
             const reverseData = await reverseRes.json()
             const newLabel = reverseData.features?.[0]?.place_name || `${newLngLat.lat.toFixed(4)}, ${newLngLat.lng.toFixed(4)}`
 
+            // Update the input field with the new location
+            props.onRouteQueryChange(newLabel)
+
+            // Update the popup with new location
+            const newShortLabel = newLabel.split(',')[0] || 'Point B'
+            const popup = pointBMarker.getPopup()
+            if (popup) {
+              popup.setHTML(`
+                <div style="background: #1e293b; color: white; padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; border: 1px solid rgba(255,255,255,0.1);">
+                  <div style="color: #ef4444; font-size: 10px; margin-bottom: 2px;">Point B</div>
+                  ${newShortLabel}
+                </div>
+              `)
+            }
+
+            // Fit map bounds to show entire route with updated Point B
+            setTimeout(() => {
+              if (!map.current) return
+
+              const newBounds = new mapboxgl.LngLatBounds()
+              newBounds.extend([pointA[0], pointA[1]]) // Point A (business)
+              newBounds.extend([newLngLat.lng, newLngLat.lat]) // Point B (new location)
+
+              // Include route geometry for better fit
+              if (drivingData.routes?.[0]?.geometry?.coordinates) {
+                drivingData.routes[0].geometry.coordinates.forEach((coord: [number, number]) => {
+                  newBounds.extend(coord)
+                })
+              }
+
+              map.current.fitBounds(newBounds, {
+                padding: { top: 120, bottom: 120, left: 150, right: 150 },
+                maxZoom: 13,
+                duration: 1200,
+              })
+              routeBoundsRef.current = newBounds
+            }, 300)
+
             props.onRouteStateChange({
               to: { label: newLabel, lat: newLngLat.lat, lng: newLngLat.lng },
               drivingMins: newDrivingMins,
+              drivingKm: newDrivingKm,
               cyclingMins: newCyclingMins,
+              cyclingKm: newCyclingKm,
               busy: false,
             })
           } catch (error) {
@@ -770,7 +1017,9 @@ export default function BusinessDiscoveryMap(props: BusinessDiscoveryMapProps) {
         props.onRouteStateChange({
           to: { label: pointBLabel, lat: latB, lng: lngB },
           drivingMins,
+          drivingKm,
           cyclingMins,
+          cyclingKm,
           busy: false,
         })
       } catch (error) {

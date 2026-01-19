@@ -1,15 +1,15 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import dynamic from 'next/dynamic'
+import dynamicImport from 'next/dynamic'
+
+export const dynamic = 'force-dynamic'
 
 // Dynamically import SearchMap to avoid SSR issues (it supports markers)
-const SearchMap = dynamic(() => import('@/components/SearchMap'), { ssr: false })
+const SearchMap = dynamicImport(() => import('@/components/SearchMap'), { ssr: false })
 
 type LocSuggestion = { id: string; label: string; lng: number; lat: number }
 
@@ -27,6 +27,8 @@ interface AnonymizedTalent {
   distance_km?: number
   search_summary: string | null
   availability_description: string | null
+  intent_status?: string | null
+  intent_visibility?: boolean
 }
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
@@ -56,6 +58,14 @@ const ROLE_TITLES = [
 ] as const
 
 export default function BusinessMapPage() {
+  return (
+    <Suspense fallback={null}>
+      <BusinessMapPageInner />
+    </Suspense>
+  )
+}
+
+function BusinessMapPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [loading, setLoading] = useState(true)
@@ -80,6 +90,8 @@ export default function BusinessMapPage() {
     minExperience: '',
     location: ''
   })
+  const [intentStatusFilter, setIntentStatusFilter] = useState<string>('')
+  const [intentCompatibility, setIntentCompatibility] = useState(false)
 
   const [skillsInput, setSkillsInput] = useState('')
   const [skillsInputOpen, setSkillsInputOpen] = useState(false)
@@ -299,6 +311,44 @@ export default function BusinessMapPage() {
             console.log(`Search visibility filter: ${beforeFilter} talents before, ${afterFilter} after filtering (${beforeFilter - afterFilter} filtered out)`)
           }
         }
+
+        // Attach intent modes (if any)
+        if (data && data.length > 0) {
+          const talentIds = data.map((t: any) => t.id).filter(Boolean)
+          const { data: intents } = await supabase
+            .from('intent_modes')
+            .select('profile_id,intent_status,visibility')
+            .eq('profile_type', 'talent')
+            .in('profile_id', talentIds)
+
+          const intentMap = new Map<string, { intent_status: string; visibility: boolean }>()
+          if (Array.isArray(intents)) {
+            intents.forEach((row: any) => {
+              if (row?.profile_id) {
+                intentMap.set(String(row.profile_id), {
+                  intent_status: row.intent_status,
+                  visibility: !!row.visibility,
+                })
+              }
+            })
+          }
+
+          data = data.map((t: any) => {
+            const intent = intentMap.get(String(t.id))
+            return {
+              ...t,
+              intent_status: intent?.intent_status ?? null,
+              intent_visibility: intent?.visibility ?? false,
+            }
+          })
+
+          if (intentStatusFilter) {
+            data = data.filter((t: any) => t.intent_visibility && t.intent_status === intentStatusFilter)
+          } else if (intentCompatibility) {
+            const compatible = new Set(['open_to_conversations', 'passive_exploring'])
+            data = data.filter((t: any) => t.intent_visibility && compatible.has(t.intent_status))
+          }
+        }
         
         // Now filter by location and other criteria client-side
         const centerLat = searchCenter.lat
@@ -427,7 +477,7 @@ export default function BusinessMapPage() {
     }
 
     loadTalents()
-  }, [searchCenter, radiusKm, filters.role, filters.skills, filters.minExperience])
+  }, [searchCenter, radiusKm, filters.role, filters.skills, filters.minExperience, intentStatusFilter, intentCompatibility])
 
   // Handle location selection
   const handleLocationSelect = (suggestion: LocSuggestion) => {
@@ -726,7 +776,11 @@ export default function BusinessMapPage() {
         lng: t.longitude!,
         type: 'talent' as const,
         title: t.title || 'Talent',
-        description: t.city && t.state ? `${t.city}, ${t.state}` : t.city || t.state || 'Location not specified'
+        description: (() => {
+          const location = t.city && t.state ? `${t.city}, ${t.state}` : t.city || t.state || 'Location not specified'
+          const intent = t.intent_visibility && t.intent_status ? `Intent: ${t.intent_status.replace(/_/g, ' ')}` : null
+          return intent ? `${location} • ${intent}` : location
+        })()
       }))
   }, [talents])
 
@@ -893,6 +947,32 @@ export default function BusinessMapPage() {
                 />
               </div>
 
+              {/* Intent Filters */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-300 mb-2">Intent filters</label>
+                <div className="flex flex-col gap-3">
+                  <select
+                    value={intentStatusFilter}
+                    onChange={(e) => setIntentStatusFilter(e.target.value)}
+                    className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">All intent statuses</option>
+                    <option value="open_to_conversations">Open to conversations</option>
+                    <option value="passive_exploring">Passive exploring</option>
+                    <option value="not_available">Not available</option>
+                  </select>
+                  <label className="flex items-center gap-2 text-xs text-gray-300">
+                    <input
+                      type="checkbox"
+                      className="accent-blue-500"
+                      checked={intentCompatibility}
+                      onChange={(e) => setIntentCompatibility(e.target.checked)}
+                    />
+                    Show only compatible intent signals
+                  </label>
+                </div>
+              </div>
+
               {error && (
                 <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-sm text-red-400">
                   {error}
@@ -952,7 +1032,19 @@ export default function BusinessMapPage() {
                         <div className="flex-1">
                           {/* Anonymized Title */}
                           {talent.title && (
-                            <h3 className="text-lg font-semibold text-white mb-2">{talent.title}</h3>
+                            <div className="flex items-center gap-2 mb-2">
+                              {talent.intent_visibility && talent.intent_status ? (
+                                <span
+                                  className={`inline-flex h-2 w-2 rounded-full ${
+                                    talent.intent_status === 'open_to_conversations' ? 'bg-emerald-400' :
+                                    talent.intent_status === 'passive_exploring' ? 'bg-blue-400' :
+                                    'bg-slate-400'
+                                  }`}
+                                  title={`Intent: ${talent.intent_status.replace(/_/g, ' ')}`}
+                                />
+                              ) : null}
+                              <h3 className="text-lg font-semibold text-white">{talent.title}</h3>
+                            </div>
                           )}
 
                           {/* Search Summary Preview (if available) */}

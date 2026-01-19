@@ -28,6 +28,7 @@ interface Job {
   application_email: string | null
   created_at: string
   business_profile_id: string | number | null
+  status?: string | null
 }
 
 export default function JobDetailPage() {
@@ -36,6 +37,10 @@ export default function JobDetailPage() {
   const searchParams = useSearchParams()
   const jobId = params?.id as string
   const fromBusiness = searchParams?.get('from_business') // Business profile ID if coming from business profile
+  const fromSearch = searchParams?.get('fromSearch') === 'true' // If coming from search page
+  const searchQuery = searchParams?.get('searchQuery') || ''
+  const searchLocation = searchParams?.get('location') || ''
+  const searchType = searchParams?.get('searchType') || 'jobs'
 
   const [job, setJob] = useState<Job | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -181,6 +186,7 @@ export default function JobDetailPage() {
         application_email: data.application_email,
         created_at: data.created_at,
         business_profile_id: jobBusinessId,
+        status: data.status || 'published',
       })
     } catch (err: any) {
       console.error('Error fetching job:', err)
@@ -217,15 +223,15 @@ export default function JobDetailPage() {
 
   async function handleApply() {
     if (!isAuthenticated) {
-      // Redirect to login/register with return URL
+      // Redirect to Talent login/register with return URL
       const returnUrl = `/jobs/${jobId}`
-      router.push(`/login?redirect=${encodeURIComponent(returnUrl)}&mode=signup&role=talent`)
+      router.push(`/login/talent?mode=signup&redirect=${encodeURIComponent(returnUrl)}`)
       return
     }
 
     if (userType !== 'talent') {
       alert('Only talent users can apply to jobs. Please register as talent.')
-      router.push(`/login?redirect=${encodeURIComponent(`/jobs/${jobId}`)}&mode=signup&role=talent`)
+      router.push(`/login/talent?mode=signup&redirect=${encodeURIComponent(`/jobs/${jobId}`)}`)
       return
     }
 
@@ -337,7 +343,14 @@ export default function JobDetailPage() {
               <Link href="/" className="hover:text-blue-400 transition-colors">Home</Link>
               <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
             </nav>
-            {fromBusiness ? (
+            {fromSearch ? (
+              <Link
+                href={`/search?searchType=${searchType}${searchQuery ? `&searchQuery=${encodeURIComponent(searchQuery)}` : ''}${searchLocation ? `&location=${encodeURIComponent(searchLocation)}` : ''}`}
+                className="px-5 py-2 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-colors text-sm"
+              >
+                ← Back to Search
+              </Link>
+            ) : fromBusiness ? (
               <Link
                 href={`/dashboard/business/view?id=${fromBusiness}`}
                 className="px-5 py-2 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-colors text-sm"
@@ -346,10 +359,10 @@ export default function JobDetailPage() {
               </Link>
             ) : (
               <Link
-                href="/jobs"
+                href="/dashboard/business?tab=vacancies"
                 className="px-5 py-2 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-colors text-sm"
               >
-                ← Back to Jobs
+                ← Back to Vacancies
               </Link>
             )}
           </div>
@@ -382,8 +395,8 @@ export default function JobDetailPage() {
             )}
           </div>
 
-          {/* Action Buttons - Show Edit/Cancel for business owners, Apply for others */}
-          {isJobOwner ? (
+          {/* Action Buttons - Show Edit/Cancel for business owners only */}
+          {isJobOwner && (
             <div className="flex items-center gap-4">
               <Link
                 href={`/dashboard/business/jobs/edit/${job.id}`}
@@ -426,45 +439,29 @@ export default function JobDetailPage() {
                 </span>
               )}
             </div>
-          ) : (
+          )}
+
+          {/* Apply Button - Show for non-owners only */}
+          {!isJobOwner && job.status === 'published' && (
             <div className="flex items-center gap-4">
-              {hasApplied ? (
-                <div className="flex items-center gap-3">
-                  <button
-                    disabled
-                    className="px-8 py-3 bg-green-500/20 text-green-400 rounded-lg font-semibold border border-green-500/50 cursor-not-allowed"
-                  >
-                    ✓ Applied
-                  </button>
-                  <span className="text-sm text-gray-400">Application submitted</span>
-                </div>
-              ) : (
-                <button
-                  onClick={handleApply}
-                  disabled={isApplying}
-                  className="px-8 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isApplying ? 'Applying...' : isAuthenticated ? 'Apply Now' : 'Register & Apply'}
-                </button>
+              <button
+                onClick={handleApply}
+                disabled={isApplying || hasApplied}
+                className="px-8 py-3 bg-[#20C997] text-white rounded-lg font-semibold hover:bg-[#1DB886] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isApplying ? 'Applying...' : hasApplied ? 'Applied' : 'Apply for Job'}
+              </button>
+              {hasApplied && (
+                <span className="px-4 py-2 bg-green-500/20 text-green-300 rounded-lg border border-green-500/50 text-sm">
+                  You have applied to this job
+                </span>
               )}
-              {job.application_url && (
-                <a
-                  href={job.application_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-6 py-3 bg-white/5 border border-white/10 text-white rounded-lg font-semibold hover:bg-white/10 transition-colors"
-                >
-                  Apply via External Link
-                </a>
-              )}
-              {job.application_email && (
-                <a
-                  href={`mailto:${job.application_email}?subject=Application for ${encodeURIComponent(job.title)}`}
-                  className="px-6 py-3 bg-white/5 border border-white/10 text-white rounded-lg font-semibold hover:bg-white/10 transition-colors"
-                >
-                  Apply via Email
-                </a>
-              )}
+            </div>
+          )}
+
+          {!isJobOwner && job.status === 'cancelled' && (
+            <div className="px-4 py-2 bg-red-500/20 text-red-300 rounded-lg border border-red-500/50 text-sm inline-block">
+              This job has been cancelled
             </div>
           )}
         </div>

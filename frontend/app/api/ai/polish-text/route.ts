@@ -16,8 +16,16 @@ export async function POST(request: NextRequest) {
     const openaiApiKey = process.env.OPENAI_API_KEY
     if (!openaiApiKey) {
       return NextResponse.json(
-        { success: false, error: 'OpenAI API key is not configured' },
+        { success: false, error: 'OpenAI API key is not configured. Please add OPENAI_API_KEY to frontend/.env.local' },
         { status: 503 }
+      )
+    }
+
+    // Validate key format
+    if (!openaiApiKey.startsWith('sk-')) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid API key format. OpenAI keys should start with "sk-"' },
+        { status: 400 }
       )
     }
 
@@ -63,8 +71,21 @@ ${text}`
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
       console.error('OpenAI API error:', errorData)
+
+      const rawMessage = String(errorData.error?.message || 'Failed to polish text')
+      const scrubbedMessage = rawMessage.replace(/sk-[a-zA-Z0-9_-]+/g, 'sk-***')
+
+      let errorMessage = scrubbedMessage
+      if (response.status === 401) {
+        errorMessage = 'Authentication failed. Please check your OpenAI API key.'
+      } else if (response.status === 429) {
+        errorMessage = 'Rate limit exceeded. Please try again later.'
+      } else if (response.status === 402) {
+        errorMessage = 'Payment required. Please check your OpenAI account billing.'
+      }
+
       return NextResponse.json(
-        { success: false, error: errorData.error?.message || 'Failed to polish text' },
+        { success: false, error: errorMessage },
         { status: response.status }
       )
     }
@@ -85,8 +106,9 @@ ${text}`
     })
   } catch (error: any) {
     console.error('Error polishing text:', error)
+    const safeMessage = String(error?.message || 'Failed to polish text').replace(/sk-[a-zA-Z0-9_-]+/g, 'sk-***')
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to polish text' },
+      { success: false, error: safeMessage },
       { status: 500 }
     )
   }

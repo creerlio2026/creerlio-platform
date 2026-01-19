@@ -15,7 +15,7 @@ interface Marker {
   lng: number
   title: string
   description?: string
-  type: 'talent' | 'business'
+  type: 'talent' | 'business' | 'job'
 }
 
 interface SearchMapProps {
@@ -112,7 +112,7 @@ export default function SearchMap({ markers, className = '', center, zoom = 11, 
         el.style.width = '32px'
         el.style.height = '32px'
         el.style.borderRadius = '50%'
-        el.style.backgroundColor = markerData.type === 'talent' ? '#3b82f6' : '#10b981'
+        el.style.backgroundColor = markerData.type === 'talent' ? '#3b82f6' : markerData.type === 'job' ? '#8b5cf6' : '#10b981'
         el.style.border = '3px solid white'
         el.style.cursor = 'pointer'
         el.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)'
@@ -236,14 +236,24 @@ export default function SearchMap({ markers, className = '', center, zoom = 11, 
       {markers.length > 0 && (
         <div className="absolute top-4 right-4 z-20 bg-slate-900/90 backdrop-blur-sm rounded-lg p-3 border border-white/10" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col gap-2 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
-              <span className="text-slate-300">Talent</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white"></div>
-              <span className="text-slate-300">Business</span>
-            </div>
+            {markers.some((m) => m.type === 'talent') && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
+                <span className="text-slate-300">Talent</span>
+              </div>
+            )}
+            {markers.some((m) => m.type === 'business') && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white"></div>
+                <span className="text-slate-300">Business</span>
+              </div>
+            )}
+            {markers.some((m) => m.type === 'job') && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-purple-500 border-2 border-white"></div>
+                <span className="text-slate-300">Connection</span>
+              </div>
+            )}
           </div>
         </div>
       )}

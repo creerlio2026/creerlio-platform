@@ -7,9 +7,6 @@ const nextConfig = {
   },
 
   // Build-time safety (Windows + Vercel)
-  experimental: {
-    outputFileTracing: false,
-  },
 
   eslint: {
     ignoreDuringBuilds: true,

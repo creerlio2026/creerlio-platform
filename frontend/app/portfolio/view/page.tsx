@@ -1,12 +1,12 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import VideoChat from '@/components/VideoChat'
+
+export const dynamic = 'force-dynamic'
 
 type PortfolioMeta = Record<string, any>
 
@@ -63,6 +63,14 @@ async function signedUrl(path: string, seconds = 60 * 30, usePublicUrl = false) 
 }
 
 export default function PortfolioViewPage() {
+  return (
+    <Suspense fallback={null}>
+      <PortfolioViewPageInner />
+    </Suspense>
+  )
+}
+
+function PortfolioViewPageInner() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const viewTalentId = searchParams?.get('talent_id') // For businesses viewing talent profiles
@@ -74,6 +82,7 @@ export default function PortfolioViewPage() {
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [viewerId, setViewerId] = useState<string | null>(null)
   const [authEmail, setAuthEmail] = useState<string | null>(null)
   const [viewingTalentId, setViewingTalentId] = useState<string | null>(null) // The talent profile ID being viewed
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null) // Connection request status: 'pending', 'accepted', 'declined'
@@ -114,6 +123,7 @@ export default function PortfolioViewPage() {
   const [connectionRequestId, setConnectionRequestId] = useState<string | null>(null) // Store connection request ID for video chat/messaging
   const [talentName, setTalentName] = useState<string | null>(null) // Store talent name for video chat
 
+  const isPublicView = !!viewTalentId || !viewerId
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -124,6 +134,7 @@ export default function PortfolioViewPage() {
         const uid = sessionRes.session?.user?.id ?? null
         const email = sessionRes.session?.user?.email ?? null
         if (!cancelled) setAuthEmail(email)
+        if (!cancelled) setViewerId(uid)
         
         // Determine which user's portfolio to load
         let targetUserId: string | null = null
@@ -2209,9 +2220,13 @@ export default function PortfolioViewPage() {
                 {/* Hero */}
                 <section className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/40">
               <div className="h-44 md:h-64 bg-slate-900 relative">
-                {bannerUrl ? (
+                {(isPublicView ? '/talent-portfolio.jpg' : bannerUrl) ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={bannerUrl} alt="Banner" className="w-full h-full object-cover opacity-80" />
+                  <img
+                    src={isPublicView ? '/talent-portfolio.jpg' : bannerUrl || ''}
+                    alt="Banner"
+                    className="w-full h-full object-cover opacity-80"
+                  />
                 ) : (
                   <div className="w-full h-full bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.35),transparent_45%),radial-gradient(circle_at_80%_30%,rgba(16,185,129,0.25),transparent_45%)]" />
                 )}

@@ -1,11 +1,17 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+
+export const dynamic = 'force-dynamic'
+
+const DEBUG_ENDPOINT = 'http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc'
+const emitDebugLog = (payload: Record<string, unknown>) => {
+  fetch(DEBUG_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+  fetch('/api/debug-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+}
 
 type BusinessProfileMeta = Record<string, any>
 
@@ -271,6 +277,14 @@ async function signedUrl(path: string, seconds = 60 * 30) {
 }
 
 export default function BusinessProfileViewPage() {
+  return (
+    <Suspense fallback={null}>
+      <BusinessProfileViewPageInner />
+    </Suspense>
+  )
+}
+
+function BusinessProfileViewPageInner() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -279,6 +293,8 @@ export default function BusinessProfileViewPage() {
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [viewerId, setViewerId] = useState<string | null>(null)
+  const [viewingBusinessSlug, setViewingBusinessSlug] = useState<string | null>(null)
   const [authEmail, setAuthEmail] = useState<string | null>(null)
   const [introVideoUrl, setIntroVideoUrl] = useState<string | null>(null)
   const [introVideoTitle, setIntroVideoTitle] = useState<string | null>(null)
@@ -299,6 +315,16 @@ export default function BusinessProfileViewPage() {
   const [eduListExpanded, setEduListExpanded] = useState(false)
   const [refListExpanded, setRefListExpanded] = useState(false)
   const [refExpanded, setRefExpanded] = useState<Record<number, boolean>>({})
+
+  useEffect(() => {
+    const params = Object.fromEntries(searchParams.entries())
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H7',location:'business/view/page.tsx:params',message:'view profile params',data:{params},timestamp:Date.now()})
+    // #endregion
+  }, [searchParams])
+
+  const fromParam = searchParams.get('from')
+  const backToMapHref = fromParam === 'talent-map' ? '/talent-map' : null
   const [projListExpanded, setProjListExpanded] = useState(false)
   const [attachExpanded, setAttachExpanded] = useState(false)
   const [jobs, setJobs] = useState<any[]>([])
@@ -309,6 +335,35 @@ export default function BusinessProfileViewPage() {
   const [connectionRequestId, setConnectionRequestId] = useState<string | null>(null) // Connection request ID from URL
   const [connectionRequest, setConnectionRequest] = useState<any | null>(null) // Connection request data
   const [processingConnection, setProcessingConnection] = useState(false) // Loading state for connection actions
+  // Visibility settings loaded from metadata
+  const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
+    basic: true,
+    social: true,
+    skills: true,
+    experience: true,
+    education: true,
+    referees: true,
+    attachments: true,
+    projects: true,
+  })
+  const [itemVisibility, setItemVisibility] = useState<Record<string, Record<number, boolean>>>({
+    social: {},
+    experience: {},
+    education: {},
+    referees: {},
+    projects: {},
+  })
+
+  const isPublicViewer = !viewerId
+  const publicConnectSlug = useMemo(() => {
+    if (viewingBusinessSlug) return viewingBusinessSlug
+    if (viewingBusinessId) return `business-${viewingBusinessId}`
+    return ''
+  }, [viewingBusinessSlug, viewingBusinessId])
+  const publicConnectHref = useMemo(() => {
+    if (!publicConnectSlug) return '/login/talent?mode=signup'
+    return `/login/talent?mode=signup&redirect=/dashboard/talent/connect/${publicConnectSlug}`
+  }, [publicConnectSlug])
 
   useEffect(() => {
     let cancelled = false
@@ -320,11 +375,16 @@ export default function BusinessProfileViewPage() {
         const uid = sessionRes.session?.user?.id ?? null
         const email = sessionRes.session?.user?.email ?? null
         if (!cancelled) setAuthEmail(email)
+        if (!cancelled) setViewerId(uid)
         
         // Get business ID from URL params (if viewing someone else's profile)
         const businessIdParam = searchParams?.get('id') || searchParams?.get('business_id')
         const businessSlugParam = searchParams?.get('slug') || searchParams?.get('business_slug')
         const fromConnectionRequestParam = searchParams?.get('from_connection_request')
+
+        if (businessSlugParam && !cancelled) {
+          setViewingBusinessSlug(businessSlugParam)
+        }
         
         // Store connection request ID if present
         if (fromConnectionRequestParam && !cancelled) {
@@ -333,10 +393,11 @@ export default function BusinessProfileViewPage() {
         
         let targetBusinessId: string | null = null
         let targetUserId: string | null = uid
+        const isPublicViewerNow = !uid
         
         // If a business ID or slug is provided, load that business's profile
         if (businessIdParam || businessSlugParam) {
-          let bpQuery = supabase.from('business_profiles').select('id, user_id')
+          let bpQuery = supabase.from('business_profiles').select('id, user_id, slug')
           
           if (businessIdParam) {
             bpQuery = bpQuery.eq('id', businessIdParam)
@@ -347,6 +408,60 @@ export default function BusinessProfileViewPage() {
           const bpRes = await bpQuery.maybeSingle()
           
           if (bpRes.error || !bpRes.data) {
+            if (isPublicViewerNow && (businessSlugParam || businessIdParam)) {
+              let pageRes = supabase
+                .from('business_profile_pages')
+                .select('business_id, slug, name, tagline, mission, hero_image_url, logo_url')
+                .eq('is_published', true)
+
+              if (businessSlugParam) {
+                pageRes = pageRes.eq('slug', businessSlugParam)
+              } else {
+                pageRes = pageRes.eq('business_id', businessIdParam as any)
+              }
+
+              const pageData = await pageRes.maybeSingle()
+
+              if (!pageData.error && pageData.data) {
+                const fallbackId = String(pageData.data.business_id ?? '')
+                let hero = String(pageData.data.hero_image_url || '').trim()
+                let logo = String(pageData.data.logo_url || '').trim()
+                if (fallbackId && (!hero || !logo)) {
+                  const bpImageRes = await supabase
+                    .from('business_profiles')
+                    .select('hero_image_url, logo_url')
+                    .eq('id', fallbackId)
+                    .maybeSingle()
+                  if (!bpImageRes.error && bpImageRes.data) {
+                    hero = hero || String(bpImageRes.data.hero_image_url || '').trim()
+                    logo = logo || String(bpImageRes.data.logo_url || '').trim()
+                  }
+                }
+                const heroIsUrl = hero.startsWith('http://') || hero.startsWith('https://')
+                const logoIsUrl = logo.startsWith('http://') || logo.startsWith('https://')
+                if (!cancelled && fallbackId) {
+                  setViewingBusinessId(fallbackId)
+                  setBusinessProfileId(fallbackId)
+                }
+                if (!cancelled && pageData.data.slug) {
+                  setViewingBusinessSlug(String(pageData.data.slug))
+                }
+                if (!cancelled) {
+                  setBannerUrl(heroIsUrl ? hero : null)
+                  setAvatarUrl(logoIsUrl ? logo : null)
+                  setMeta({
+                    name: pageData.data.name || 'Business',
+                    title: pageData.data.tagline || pageData.data.name || 'Business',
+                    bio: pageData.data.mission || '',
+                    banner_path: heroIsUrl ? '' : hero,
+                    avatar_path: logoIsUrl ? '' : logo,
+                  })
+                  setError(null)
+                }
+                return
+              }
+            }
+
             setError('Business profile not found.')
             return
           }
@@ -357,6 +472,9 @@ export default function BusinessProfileViewPage() {
           if (!cancelled) {
             setViewingBusinessId(targetBusinessId)
             setBusinessProfileId(targetBusinessId)
+            if (bpRes.data?.slug) {
+              setViewingBusinessSlug(String(bpRes.data.slug))
+            }
           }
         } else {
           // No business ID provided - viewing own profile (requires auth)
@@ -395,14 +513,62 @@ export default function BusinessProfileViewPage() {
         
         const bpCheck = await bpCheckQuery.maybeSingle()
 
-        if (bpCheck.error) {
-          console.error('[View Profile] Failed to check business_profiles:', bpCheck.error)
-          setError(bpCheck.error.message)
-          return
-        }
+        if (bpCheck.error || !bpCheck.data) {
+          if (isPublicViewerNow && businessSlugParam) {
+            const pageRes = await supabase
+              .from('business_profile_pages')
+              .select('business_id, slug, name, tagline, mission, hero_image_url, logo_url')
+              .eq('slug', businessSlugParam)
+              .eq('is_published', true)
+              .maybeSingle()
 
-        // If no business_profiles record exists, show empty state
-        if (!bpCheck.data) {
+            if (!pageRes.error && pageRes.data) {
+              const fallbackId = String(pageRes.data.business_id ?? '')
+              let hero = String(pageRes.data.hero_image_url || '').trim()
+              let logo = String(pageRes.data.logo_url || '').trim()
+              if (fallbackId && (!hero || !logo)) {
+                const bpImageRes = await supabase
+                  .from('business_profiles')
+                  .select('hero_image_url, logo_url')
+                  .eq('id', fallbackId)
+                  .maybeSingle()
+                if (!bpImageRes.error && bpImageRes.data) {
+                  hero = hero || String(bpImageRes.data.hero_image_url || '').trim()
+                  logo = logo || String(bpImageRes.data.logo_url || '').trim()
+                }
+              }
+              const heroIsUrl = hero.startsWith('http://') || hero.startsWith('https://')
+              const logoIsUrl = logo.startsWith('http://') || logo.startsWith('https://')
+              if (!cancelled && fallbackId) {
+                setBusinessProfileId(fallbackId)
+                setViewingBusinessId(fallbackId)
+              }
+              if (!cancelled && pageRes.data.slug) {
+                setViewingBusinessSlug(String(pageRes.data.slug))
+              }
+              if (!cancelled) {
+                setBannerUrl(heroIsUrl ? hero : null)
+                setAvatarUrl(logoIsUrl ? logo : null)
+                setMeta({
+                  name: pageRes.data.name || 'Business',
+                  title: pageRes.data.tagline || pageRes.data.name || 'Business',
+                  bio: pageRes.data.mission || '',
+                  banner_path: heroIsUrl ? '' : hero,
+                  avatar_path: logoIsUrl ? '' : logo,
+                })
+                setError(null)
+              }
+              return
+            }
+          }
+
+          if (bpCheck.error) {
+            console.error('[View Profile] Failed to check business_profiles:', bpCheck.error)
+            setError(bpCheck.error.message)
+            return
+          }
+
+          // If no business_profiles record exists, show empty state
           console.warn('[View Profile] No business_profiles record found')
           setMeta(null)
           return
@@ -450,6 +616,22 @@ export default function BusinessProfileViewPage() {
           console.warn('[View Profile] Profile metadata is invalid:', saved)
           setMeta(null)
           return
+        }
+
+        // Load visibility settings
+        if (!cancelled) {
+          if (saved?.sectionVisibility && typeof saved.sectionVisibility === 'object') {
+            setSectionVisibility((prev) => ({
+              ...prev,
+              ...saved.sectionVisibility,
+            }))
+          }
+          if (saved?.itemVisibility && typeof saved.itemVisibility === 'object') {
+            setItemVisibility((prev) => ({
+              ...prev,
+              ...saved.itemVisibility,
+            }))
+          }
         }
 
         // Debug: Log social links and media info
@@ -782,25 +964,30 @@ export default function BusinessProfileViewPage() {
       if (!merged.includes(k)) merged.push(k)
     }
     // Filter out 'social' from sectionOrder - it should only appear in sidebar, not main content
+    // Also filter out sections that are not visible (sectionVisibility is false)
     const filtered = merged.filter((k) => {
       const key = String(k).toLowerCase().trim()
-      return key !== 'social'
+      if (key === 'social') return false // Social always in sidebar
+      // Check section visibility - default to true if not set
+      const sectionKey = key === 'skills' ? 'skills' : key
+      const isVisible = sectionVisibility[sectionKey] !== false // Default to true
+      return isVisible
     })
-    // Debug: Log if social was filtered out
+    // Debug: Log if sections were filtered out
     if (merged.length !== filtered.length) {
-      console.log('[View Profile] Filtered out social section from sectionOrder:', {
+      console.log('[View Profile] Filtered sections:', {
         original: merged,
         filtered: filtered,
-        removed: merged.filter((k) => String(k).toLowerCase().trim() === 'social')
+        visibility: sectionVisibility,
       })
     }
     return filtered
-  }, [meta])
+  }, [meta, sectionVisibility])
   const skills = useMemo(() => safeArray<string>(meta?.skills).map((s) => String(s || '').trim()).filter(Boolean), [meta])
   const experience = useMemo(() => {
     const raw = safeArray<any>(meta?.experience)
     return raw
-      .map((e) => {
+      .map((e, originalIdx) => {
         // Preserve attachmentIds
         const attachmentIds = Array.isArray(e?.attachmentIds) ? e.attachmentIds.filter((id: any) => {
           const num = Number(id)
@@ -810,16 +997,23 @@ export default function BusinessProfileViewPage() {
         return {
           ...e,
           attachmentIds: attachmentIds,
+          _originalIndex: originalIdx, // Store original index for visibility checking
         }
       })
       .filter((e) => {
+        // Filter by item visibility (default to true if not set)
+        // Use the original index from the raw array
+        const isItemVisible = itemVisibility.experience?.[e._originalIndex] !== false
+        if (!isItemVisible) return false
+        
+        // Filter by content
         const title = String(e?.role || e?.title || '').trim()
         const company = String(e?.company || e?.organisation || '').trim()
         const desc = normalizeDisplayText(String(e?.description || ''))
         const hasAttachments = Array.isArray(e.attachmentIds) && e.attachmentIds.length > 0
         return !!(title || company || desc || hasAttachments)
       })
-  }, [meta])
+  }, [meta, itemVisibility])
   const education = useMemo(() => {
     const raw = safeArray<any>(meta?.education)
     if (!raw.length) return []
@@ -881,13 +1075,17 @@ export default function BusinessProfileViewPage() {
       }
     })
     
-    return processed.filter((e) => {
+    return processed.filter((e, idx) => {
+      // Filter by item visibility (default to true if not set)
+      const isItemVisible = itemVisibility.education?.[idx] !== false
+      if (!isItemVisible) return false
+      
       // Include if at least one field has content OR has attachments
       const hasContent = !!(e.institution || e.degree || e.notes || e.year)
       const hasAttachments = Array.isArray(e.attachmentIds) && e.attachmentIds.length > 0
       return hasContent || hasAttachments
     })
-  }, [meta])
+  }, [meta, itemVisibility])
   const referees = useMemo(() => {
     // View Profile must show ALL saved referees from Edit Profile
     // Show any referee that has at least one field with content
@@ -904,10 +1102,14 @@ export default function BusinessProfileViewPage() {
     }))
     // Include if at least one field has content - but be more lenient
     // Include if name exists OR any other field has content
-    return mapped.filter((r) => {
+    return mapped.filter((r, idx) => {
+      // Filter by item visibility (default to true if not set)
+      const isItemVisible = itemVisibility.referees?.[idx] !== false
+      if (!isItemVisible) return false
+      
       return !!(r.name || r.notes || r.email || r.phone || r.title || r.company || r.relationship)
     })
-  }, [meta])
+  }, [meta, itemVisibility])
   const projects = useMemo(() => {
     // View Profile must show ALL saved job vacancies from Edit Profile
     // Show any project that has at least one field with content
@@ -919,12 +1121,19 @@ export default function BusinessProfileViewPage() {
         description: normalizeDisplayText(String(p?.description || '')),
         attachmentIds: Array.isArray(p?.attachmentIds) ? p.attachmentIds : [],
       }))
-      .filter((p) => {
+      .filter((p, idx) => {
+        // Filter by item visibility (default to true if not set)
+        const isItemVisible = itemVisibility.projects?.[idx] !== false
+        if (!isItemVisible) return false
+        
         // Include if at least one field has content (same as before, but more explicit)
         return !!(p.name || p.url || p.description || (p.attachmentIds && p.attachmentIds.length > 0))
       })
+  }, [meta, itemVisibility])
+  const attachments = useMemo(() => {
+    // Attachments don't have individual visibility, only section visibility
+    return safeArray<any>(meta?.attachments)
   }, [meta])
-  const attachments = useMemo(() => safeArray<any>(meta?.attachments), [meta])
 
   const socialLinks = useMemo<SocialLink[]>(() => {
     const m: any = meta ?? {}
@@ -932,12 +1141,17 @@ export default function BusinessProfileViewPage() {
 
     // Preferred shape: socialLinks: [{platform,url}]
     const raw = Array.isArray(m.socialLinks) ? m.socialLinks : []
-    for (const it of raw) {
+    raw.forEach((it, idx) => {
       const platform = String((it as any)?.platform ?? '').trim()
       const url = String((it as any)?.url ?? '').trim()
-      if (!platform || !url) continue
+      if (!platform || !url) return
+      
+      // Filter by item visibility (default to true if not set)
+      const isItemVisible = itemVisibility.social?.[idx] !== false
+      if (!isItemVisible) return
+      
       list.push({ platform, url })
-    }
+    })
 
     // Back-compat: single fields
     const legacy: Array<[string, string | null | undefined]> = [
@@ -969,7 +1183,7 @@ export default function BusinessProfileViewPage() {
       out.push(it)
     }
     return out
-  }, [meta])
+  }, [meta, itemVisibility.social])
 
   const title = (typeof meta?.title === 'string' && meta.title) || 'Your Profile'
   const name = (typeof meta?.name === 'string' && meta.name) || 'Business'
@@ -1482,160 +1696,190 @@ export default function BusinessProfileViewPage() {
 
       <header className="sticky top-0 z-40 backdrop-blur bg-slate-950/70 border-b border-white/10">
         <div className="max-w-[95vw] xl:max-w-[1400px] mx-auto px-4 md:px-8 py-4 flex items-center justify-between">
-          <Link href="/dashboard/business" className="text-slate-300 hover:text-blue-400">
-            ← Back to Dashboard
-          </Link>
-          <div className="flex items-center gap-3">
-            {/* Connection Request Action Buttons */}
-            {connectionRequest && (connectionRequest.status === 'pending' || connectionRequest.status === 'waiting_for_review' || connectionRequest.status === 'rejected' || connectionRequest.status === 'declined') && (
+          <div className="flex items-center gap-4">
+            {!isPublicViewer ? (
               <>
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Accept connection request from ${name || 'this business'}? You'll be able to message and collaborate with them.`)) {
-                      return
-                    }
-                    
-                    setProcessingConnection(true)
-                    try {
-                      const { data: sessionRes } = await supabase.auth.getSession()
-                      const uid = sessionRes.session?.user?.id
-                      if (!uid) {
-                        throw new Error('Please sign in to accept connection requests.')
-                      }
-                      
-                      const talentRes = await supabase
-                        .from('talent_profiles')
-                        .select('id')
-                        .eq('user_id', uid)
-                        .single()
-                      
-                      if (talentRes.error || !talentRes.data?.id) {
-                        throw new Error('Talent profile not found. Please complete your profile first.')
-                      }
-                      
-                      const talentId = String(talentRes.data.id)
-                      
-                      const { error } = await supabase
-                        .from('talent_connection_requests')
-                        .update({ 
-                          status: 'accepted',
-                          responded_at: new Date().toISOString()
-                        })
-                        .eq('id', connectionRequest.id)
-                        .eq('talent_id', talentId)
-                      
-                      if (error) {
-                        console.error('Error accepting connection:', error)
-                        throw error
-                      }
-                      
-                      // Remove connection request ID from URL and reload
-                      router.push(`/dashboard/business/view?id=${businessProfileId}`)
-                      window.location.reload()
-                    } catch (err: any) {
-                      console.error('Error accepting connection:', err)
-                      alert(err.message || 'Failed to accept connection request. Please try again.')
-                    } finally {
-                      setProcessingConnection(false)
-                    }
-                  }}
-                  disabled={processingConnection}
-                  className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {processingConnection ? 'Processing...' : 'Accept Connection'}
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!confirm(`Decline connection request from ${name || 'this business'}? This action cannot be undone.`)) {
-                      return
-                    }
-                    
-                    setProcessingConnection(true)
-                    try {
-                      const { error } = await supabase
-                        .from('talent_connection_requests')
-                        .update({ 
-                          status: 'rejected',
-                          responded_at: new Date().toISOString()
-                        })
-                        .eq('id', connectionRequest.id)
-                      
-                      if (error) throw error
-                      
-                      // Remove connection request ID from URL and reload
-                      router.push(`/dashboard/business/view?id=${businessProfileId}`)
-                      window.location.reload()
-                    } catch (err: any) {
-                      console.error('Error declining connection:', err)
-                      alert(err.message || 'Failed to decline connection request. Please try again.')
-                    } finally {
-                      setProcessingConnection(false)
-                    }
-                  }}
-                  disabled={processingConnection}
-                  className="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {processingConnection ? 'Processing...' : 'Decline'}
-                </button>
-                <button
-                  onClick={async () => {
-                    setProcessingConnection(true)
-                    try {
-                      const { data: sessionRes } = await supabase.auth.getSession()
-                      const uid = sessionRes.session?.user?.id
-                      if (!uid) {
-                        throw new Error('Please sign in to update connection requests.')
-                      }
-                      
-                      const talentRes = await supabase
-                        .from('talent_profiles')
-                        .select('id')
-                        .eq('user_id', uid)
-                        .single()
-                      
-                      if (talentRes.error || !talentRes.data?.id) {
-                        throw new Error('Talent profile not found.')
-                      }
-                      
-                      const talentId = String(talentRes.data.id)
-                      
-                      const { error } = await supabase
-                        .from('talent_connection_requests')
-                        .update({ 
-                          status: 'waiting_for_review',
-                          responded_at: new Date().toISOString()
-                        })
-                        .eq('id', connectionRequest.id)
-                        .eq('talent_id', talentId)
-                      
-                      if (error) {
-                        console.error('Error updating connection request:', error)
-                        throw error
-                      }
-                      
-                      // Navigate back to Connections page
-                      router.push('/dashboard/talent?tab=connections')
-                    } catch (err: any) {
-                      console.error('Error updating connection request:', err)
-                      alert(err.message || 'Failed to update connection request. Please try again.')
-                    } finally {
-                      setProcessingConnection(false)
-                    }
-                  }}
-                  disabled={processingConnection}
-                  className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {processingConnection ? 'Processing...' : 'Review Later'}
-                </button>
+                {backToMapHref ? (
+                  <Link href={backToMapHref} className="text-slate-300 hover:text-blue-400">
+                    ← Back to Talent Map
+                  </Link>
+                ) : null}
+                <Link href="/dashboard/business" className="text-slate-300 hover:text-blue-400">
+                  ← Back to Dashboard
+                </Link>
               </>
-            )}
-            {isOwner && (
-              <Link
-                href="/dashboard/business/edit"
-                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 font-semibold"
-              >
-                Edit Profile
-              </Link>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-3">
+            {isPublicViewer ? (
+              <>
+                <Link
+                  href={publicConnectHref}
+                  className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
+                >
+                  Connect with this Business
+                </Link>
+                <Link
+                  href="/"
+                  className="px-4 py-2 rounded-lg border border-white/15 text-white hover:bg-white/5 transition-colors"
+                >
+                  Back to Home
+                </Link>
+              </>
+            ) : (
+              <>
+                {/* Connection Request Action Buttons */}
+                {connectionRequest && (connectionRequest.status === 'pending' || connectionRequest.status === 'waiting_for_review' || connectionRequest.status === 'rejected' || connectionRequest.status === 'declined') && (
+                  <>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Accept connection request from ${name || 'this business'}? You'll be able to message and collaborate with them.`)) {
+                          return
+                        }
+                        
+                        setProcessingConnection(true)
+                        try {
+                          const { data: sessionRes } = await supabase.auth.getSession()
+                          const uid = sessionRes.session?.user?.id
+                          if (!uid) {
+                            throw new Error('Please sign in to accept connection requests.')
+                          }
+                          
+                          const talentRes = await supabase
+                            .from('talent_profiles')
+                            .select('id')
+                            .eq('user_id', uid)
+                            .single()
+                          
+                          if (talentRes.error || !talentRes.data?.id) {
+                            throw new Error('Talent profile not found. Please complete your profile first.')
+                          }
+                          
+                          const talentId = String(talentRes.data.id)
+                          
+                          const { error } = await supabase
+                            .from('talent_connection_requests')
+                            .update({ 
+                              status: 'accepted',
+                              responded_at: new Date().toISOString()
+                            })
+                            .eq('id', connectionRequest.id)
+                            .eq('talent_id', talentId)
+                          
+                          if (error) {
+                            console.error('Error accepting connection:', error)
+                            throw error
+                          }
+                          
+                          // Remove connection request ID from URL and reload
+                          router.push(`/dashboard/business/view?id=${businessProfileId}`)
+                          window.location.reload()
+                        } catch (err: any) {
+                          console.error('Error accepting connection:', err)
+                          alert(err.message || 'Failed to accept connection request. Please try again.')
+                        } finally {
+                          setProcessingConnection(false)
+                        }
+                      }}
+                      disabled={processingConnection}
+                      className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {processingConnection ? 'Processing...' : 'Accept Connection'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Decline connection request from ${name || 'this business'}? This action cannot be undone.`)) {
+                          return
+                        }
+                        
+                        setProcessingConnection(true)
+                        try {
+                          const { error } = await supabase
+                            .from('talent_connection_requests')
+                            .update({ 
+                              status: 'rejected',
+                              responded_at: new Date().toISOString()
+                            })
+                            .eq('id', connectionRequest.id)
+                          
+                          if (error) throw error
+                          
+                          // Remove connection request ID from URL and reload
+                          router.push(`/dashboard/business/view?id=${businessProfileId}`)
+                          window.location.reload()
+                        } catch (err: any) {
+                          console.error('Error declining connection:', err)
+                          alert(err.message || 'Failed to decline connection request. Please try again.')
+                        } finally {
+                          setProcessingConnection(false)
+                        }
+                      }}
+                      disabled={processingConnection}
+                      className="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {processingConnection ? 'Processing...' : 'Decline'}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setProcessingConnection(true)
+                        try {
+                          const { data: sessionRes } = await supabase.auth.getSession()
+                          const uid = sessionRes.session?.user?.id
+                          if (!uid) {
+                            throw new Error('Please sign in to update connection requests.')
+                          }
+                          
+                          const talentRes = await supabase
+                            .from('talent_profiles')
+                            .select('id')
+                            .eq('user_id', uid)
+                            .single()
+                          
+                          if (talentRes.error || !talentRes.data?.id) {
+                            throw new Error('Talent profile not found.')
+                          }
+                          
+                          const talentId = String(talentRes.data.id)
+                          
+                          const { error } = await supabase
+                            .from('talent_connection_requests')
+                            .update({ 
+                              status: 'waiting_for_review',
+                              responded_at: new Date().toISOString()
+                            })
+                            .eq('id', connectionRequest.id)
+                            .eq('talent_id', talentId)
+                          
+                          if (error) {
+                            console.error('Error updating connection request:', error)
+                            throw error
+                          }
+                          
+                          // Navigate back to Connections page
+                          router.push('/dashboard/talent?tab=connections')
+                        } catch (err: any) {
+                          console.error('Error updating connection request:', err)
+                          alert(err.message || 'Failed to update connection request. Please try again.')
+                        } finally {
+                          setProcessingConnection(false)
+                        }
+                      }}
+                      disabled={processingConnection}
+                      className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {processingConnection ? 'Processing...' : 'Review Later'}
+                    </button>
+                  </>
+                )}
+                {isOwner && (
+                  <Link
+                    href="/dashboard/business/edit"
+                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 font-semibold"
+                  >
+                    Edit Profile
+                  </Link>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1652,15 +1896,19 @@ export default function BusinessProfileViewPage() {
           </div>
         ) : !meta ? (
           <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-8">
-            <h1 className="text-2xl font-bold">No profile saved yet</h1>
+            <h1 className="text-2xl font-bold">Profile unavailable</h1>
             <p className="text-slate-300 mt-2">
-              Create your profile first, then come back here to review exactly what it looks like.
+              {isPublicViewer
+                ? 'This business profile is not available.'
+                : 'Create your profile first, then come back here to review exactly what it looks like.'}
             </p>
-            <div className="mt-6">
-              <Link href="/dashboard/business/edit" className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 font-semibold">
-                Build your profile
-              </Link>
-            </div>
+            {!isPublicViewer ? (
+              <div className="mt-6">
+                <Link href="/dashboard/business/edit" className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 font-semibold">
+                  Build your profile
+                </Link>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-8">
@@ -1826,9 +2074,11 @@ export default function BusinessProfileViewPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="text-slate-400">
-                          Introduction video is being loaded. If it doesn't appear, please check your video file in Edit Profile.
-                        </div>
+                        !isPublicViewer ? (
+                          <div className="text-slate-400">
+                            Introduction video is being loaded. If it doesn't appear, please check your video file in Edit Profile.
+                          </div>
+                        ) : null
                       )}
                     </section>
                   )
@@ -2261,65 +2511,67 @@ export default function BusinessProfileViewPage() {
 
               {/* Sidebar */}
               <aside className="lg:col-span-3 space-y-6">
-                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
-                  <div className="text-slate-200 font-semibold mb-4">View and Connect with {name}</div>
-                  <div className="space-y-4 text-sm">
-                    {authEmail ? (
-                      <div>
-                        <div className="text-slate-400 text-xs">Email</div>
-                        <div className="text-slate-200 break-all">{authEmail}</div>
-                      </div>
-                    ) : null}
-                    {(meta as any)?.phone ? (
-                      <div>
-                        <div className="text-slate-400 text-xs">Phone</div>
-                        <div className="text-slate-200">{String((meta as any).phone)}</div>
-                      </div>
-                    ) : null}
-                    {(() => {
-                      // Keep legacy LinkedIn field support, but avoid duplicating if socialLinks already includes LinkedIn.
-                      if (socialLinks.some((s) => String(s.platform).toLowerCase().includes('linkedin'))) return null
-                      const m: any = meta ?? {}
-                      const link =
-                        m.linkedin ||
-                        m.linkedIn ||
-                        m?.social?.linkedin ||
-                        m?.socialLinks?.linkedin ||
-                        m?.socials?.linkedin ||
-                        null
-                      if (!link) return null
-                      return (
+                {!isPublicViewer ? (
+                  <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+                    <div className="text-slate-200 font-semibold mb-4">View and Connect with {name}</div>
+                    <div className="space-y-4 text-sm">
+                      {authEmail ? (
                         <div>
-                          <div className="text-slate-400 text-xs">LinkedIn</div>
-                          <a className="text-blue-300 hover:text-blue-200 break-all" href={String(link)} target="_blank" rel="noreferrer">
-                            {String(link)}
-                          </a>
+                          <div className="text-slate-400 text-xs">Email</div>
+                          <div className="text-slate-200 break-all">{authEmail}</div>
                         </div>
-                      )
-                    })()}
-                  </div>
-
-                  {/* Social icons under Connect with Me */}
-                  {socialLinks.length ? (
-                    <div className="mt-6">
-                      <div className="text-slate-400 text-xs mb-2">Social</div>
-                      <SocialIconBar links={socialLinks} />
+                      ) : null}
+                      {(meta as any)?.phone ? (
+                        <div>
+                          <div className="text-slate-400 text-xs">Phone</div>
+                          <div className="text-slate-200">{String((meta as any).phone)}</div>
+                        </div>
+                      ) : null}
+                      {(() => {
+                        // Keep legacy LinkedIn field support, but avoid duplicating if socialLinks already includes LinkedIn.
+                        if (socialLinks.some((s) => String(s.platform).toLowerCase().includes('linkedin'))) return null
+                        const m: any = meta ?? {}
+                        const link =
+                          m.linkedin ||
+                          m.linkedIn ||
+                          m?.social?.linkedin ||
+                          m?.socialLinks?.linkedin ||
+                          m?.socials?.linkedin ||
+                          null
+                        if (!link) return null
+                        return (
+                          <div>
+                            <div className="text-slate-400 text-xs">LinkedIn</div>
+                            <a className="text-blue-300 hover:text-blue-200 break-all" href={String(link)} target="_blank" rel="noreferrer">
+                              {String(link)}
+                            </a>
+                          </div>
+                        )
+                      })()}
                     </div>
-                  ) : null}
 
-                  {skills.length ? (
-                    <div className="mt-6">
-                      <div className="text-slate-400 text-xs mb-2">Products & Services</div>
-                      <div className="flex flex-wrap gap-2">
-                        {skills.slice(0, 6).map((s, idx) => (
-                          <span key={`${s}-${idx}`} className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-200 text-xs">
-                            {s}
-                          </span>
-                        ))}
+                    {/* Social icons under Connect with Me */}
+                    {socialLinks.length && sectionVisibility.social !== false ? (
+                      <div className="mt-6">
+                        <div className="text-slate-400 text-xs mb-2">Social</div>
+                        <SocialIconBar links={socialLinks} />
                       </div>
-                    </div>
-                  ) : null}
-                </div>
+                    ) : null}
+
+                    {skills.length ? (
+                      <div className="mt-6">
+                        <div className="text-slate-400 text-xs mb-2">Products & Services</div>
+                        <div className="flex flex-wrap gap-2">
+                          {skills.slice(0, 6).map((s, idx) => (
+                            <span key={`${s}-${idx}`} className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-200 text-xs">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {/* Job Vacancies: placed under Connect With Me to sit beside the intro video */}
                 <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">

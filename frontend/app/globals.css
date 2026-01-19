@@ -47,9 +47,10 @@ body {
 
 /* Dashboard card styles */
 .dashboard-card {
-  background: rgba(15, 23, 42, 0.8);
+  background: white;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(var(--accent-blue), 0.2);
+  border: 1px solid rgba(229, 231, 235, 1);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
 }
 
 /* Slow spin animation */
@@ -240,4 +241,16 @@ select[class*="bg-zinc-50"] {
 
 .animate-align-center {
   animation: align-center 6s ease-in-out infinite;
+}
+
+/* Mapbox Point B Popup Styling */
+.point-b-popup .mapboxgl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.point-b-popup .mapboxgl-popup-tip {
+  display: none !important;
 }

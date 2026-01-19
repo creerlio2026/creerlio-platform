@@ -40,10 +40,6 @@ export default function BusinessBankPage() {
     | null
   >(null)
 
-  // Text block form
-  const [textTitle, setTextTitle] = useState('')
-  const [textContent, setTextContent] = useState('')
-
   // Link form
   const [linkTitle, setLinkTitle] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
@@ -255,39 +251,6 @@ export default function BusinessBankPage() {
       setUploadError(err.message || err.details || 'Upload failed. Check console for details.')
     } finally {
       setIsUploading(false)
-    }
-  }
-
-  async function handleTextBlockCreate() {
-    if (!textTitle.trim() || !userId) {
-      setUploadError('Title is required')
-      return
-    }
-
-    try {
-      const { error } = await supabase.from('business_bank_items').insert({
-        user_id: userId,
-        item_type: 'text',
-        title: textTitle,
-        description: textContent || null,
-        metadata: {
-          content: textContent || '',
-        },
-      })
-
-      if (error) {
-        console.error('Database error:', error)
-        throw error
-      }
-
-      // Reset form immediately after successful creation
-      setTextTitle('')
-      setTextContent('')
-      setUploadError(null)
-      await loadItems()
-    } catch (err: any) {
-      console.error('Error creating text block:', err)
-      setUploadError(err.message || err.details || 'Failed to create text block')
     }
   }
 
@@ -870,7 +833,7 @@ export default function BusinessBankPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">Business Bank</h1>
           <p className="text-gray-400">
-            Store images, videos, text blocks, and links for your business profile
+            Store images, videos, and links for your business profile
           </p>
         </div>
 
@@ -937,33 +900,6 @@ export default function BusinessBankPage() {
               className="px-6 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
               {isUploading ? 'Uploading...' : 'Upload Files'}
-            </button>
-          </div>
-        </div>
-
-        {/* Add Text Block */}
-        <div className="mb-8 p-6 bg-gray-800/50 rounded-lg border border-gray-700">
-          <h3 className="text-lg font-semibold text-white mb-4">Add Text Block</h3>
-          <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="Title"
-              value={textTitle}
-              onChange={(e) => setTextTitle(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
-            />
-            <textarea
-              placeholder="Content"
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-              rows={4}
-              className="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
-            />
-            <button
-              onClick={handleTextBlockCreate}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              Create Text Block
             </button>
           </div>
         </div>
@@ -1121,7 +1057,7 @@ export default function BusinessBankPage() {
           </div>
         ) : filteredItems.length === 0 ? (
           <div className="text-center py-12 text-gray-400">
-            <p>No items found. Upload files or create text blocks to get started.</p>
+            <p>No items found. Upload files to get started.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

@@ -1,20 +1,29 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 export default function TalentLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <TalentLoginPageInner />
+    </Suspense>
+  )
+}
+
+function TalentLoginPageInner() {
   const UI_VERSION = 'talent-login-2025-12-24a'
   const router = useRouter()
   const params = useSearchParams()
   const redirectTo = params.get('redirect') || '/dashboard/talent'
   const initialMode = params.get('mode')
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  // Initialize mode from URL params - default to signup if mode=signup is in URL
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode === 'signup' ? 'signup' : 'signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -29,8 +38,13 @@ export default function TalentLoginPage() {
   const [resetEmail, setResetEmail] = useState('')
 
   useEffect(() => {
-    if (initialMode === 'signup') setMode('signup')
-    if (initialMode === 'signin') setMode('signin')
+    // Ensure mode matches URL parameter
+    if (initialMode === 'signup') {
+      setMode('signup')
+    } else if (initialMode === 'signin') {
+      setMode('signin')
+    }
+    // If no mode parameter, keep current state (or default to signin)
     try {
       localStorage.setItem('creerlio_active_role', 'talent')
       localStorage.setItem('user_type', 'talent')
@@ -63,7 +77,7 @@ export default function TalentLoginPage() {
     }).catch(() => {})
   }, [router, redirectTo, initialMode])
 
-  async function oauth(provider: 'google' | 'apple') {
+  const oauth = async (provider: 'google' | 'apple') => {
     setBusy(true)
     setError(null)
     try {
@@ -110,7 +124,7 @@ export default function TalentLoginPage() {
     }
   }
 
-  async function handleForgotPassword(e: React.FormEvent) {
+  const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
@@ -135,7 +149,7 @@ export default function TalentLoginPage() {
     }
   }
 
-  async function submit(e: React.FormEvent) {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
@@ -298,16 +312,56 @@ export default function TalentLoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-6">
-      <div className="w-full max-w-md dashboard-card rounded-xl p-8 border border-white/10">
-        <div className="flex items-center justify-between mb-6">
-          <Link href="/" className="text-white text-xl font-bold hover:text-blue-400 transition-colors">
-            Creerlio
-          </Link>
-          <Link href="/login/business" className="text-slate-300 hover:text-green-400 transition-colors text-sm">
-            I’m a Business →
-          </Link>
+    <div className="min-h-screen bg-white">
+      {/* Public Header */}
+      <header className="sticky top-0 z-50 bg-black border-0">
+        <div className="max-w-7xl mx-auto px-8 py-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-[#20C997] transition-colors">
+              Creerlio
+            </Link>
+
+            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-white">
+              <Link href="/about" className="hover:text-[#20C997] transition-colors">About</Link>
+              <Link href="/#talent" className="hover:text-[#20C997] transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-[#20C997] transition-colors">Business</Link>
+              <Link href="/search" className="hover:text-[#20C997] transition-colors">Search</Link>
+              <Link href="/jobs" className="hover:text-[#20C997] transition-colors">Jobs</Link>
+            </nav>
+
+            <div className="flex gap-3">
+              <Link
+                href="/login/talent?mode=signup&redirect=/dashboard/talent"
+                className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Create Talent Account
+              </Link>
+              <Link
+                href="/login/business?mode=signup&redirect=/dashboard/business"
+                className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Create Business Account
+              </Link>
+              <Link
+                href="/login/talent?mode=signin&redirect=/dashboard/talent"
+                className="px-5 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+              >
+                Sign In
+              </Link>
+            </div>
+          </div>
         </div>
+      </header>
+
+      {/* Login Form Section */}
+      <div className="min-h-[calc(100vh-80px)] bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center px-6 py-8">
+        <div className="w-full max-w-4xl dashboard-card rounded-xl p-8 border border-white/10">
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-xl font-bold text-white">Create Talent Account</h1>
+            <Link href="/login/business" className="text-slate-300 hover:text-green-400 transition-colors text-sm">
+              I'm a Business →
+            </Link>
+          </div>
 
         <h1 className="text-2xl font-bold text-white mb-2">{mode === 'signin' ? 'Talent sign in' : 'Create Talent account'}</h1>
         <p className="text-gray-400 text-sm mb-6">Talent can sign in with email/password or supported providers.</p>
@@ -399,54 +453,48 @@ export default function TalentLoginPage() {
             </button>
           </form>
         ) : (
-          <form onSubmit={submit} className="space-y-4">
-            {mode === 'signup' && (
+          <form onSubmit={submit} className={mode === 'signup' ? 'grid grid-cols-2 gap-4' : 'space-y-4'}>
+            {mode === 'signup' ? (
               <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">First Name <span className="text-red-400">*</span></label>
-                    <input
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                      style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-                      placeholder="John"
-                      autoComplete="given-name"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">Last Name <span className="text-red-400">*</span></label>
-                    <input
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                      style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-                      placeholder="Doe"
-                      autoComplete="family-name"
-                      required
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">First Name <span className="text-red-400">*</span></label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="John"
+                    autoComplete="given-name"
+                    required
+                  />
                 </div>
-              </>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-              />
-            </div>
-            {mode === 'signup' && (
-              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Last Name <span className="text-red-400">*</span></label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="Doe"
+                    autoComplete="family-name"
+                    required
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">Phone Number</label>
                   <input
@@ -459,7 +507,7 @@ export default function TalentLoginPage() {
                     autoComplete="tel"
                   />
                 </div>
-                <div>
+                <div className={enable2FA ? 'col-span-2' : ''}>
                   <label className="flex items-center gap-2 mb-2">
                     <input
                       type="checkbox"
@@ -482,38 +530,65 @@ export default function TalentLoginPage() {
                     />
                   )}
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="At least 8 characters"
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Confirm Password <span className="text-red-400">*</span></label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="Confirm your password"
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    required
+                  />
+                </div>
               </>
             )}
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-                placeholder={mode === 'signin' ? '••••••••' : 'At least 8 characters'}
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                required
-              />
-            </div>
-            {mode === 'signup' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Confirm Password <span className="text-red-400">*</span></label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                  style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-                  placeholder="Confirm your password"
-                  autoComplete="new-password"
-                  required
-                />
-              </div>
-            )}
             {mode === 'signin' && (
-              <div className="flex justify-end">
+              <div className="flex justify-end col-span-2">
                 <button
                   type="button"
                   onClick={() => setShowForgotPassword(true)}
@@ -526,15 +601,14 @@ export default function TalentLoginPage() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+              className={`${mode === 'signup' ? 'col-span-2' : 'w-full'} px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60`}
             >
               {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
             </button>
           </form>
         )}
+        </div>
       </div>
     </div>
   )
 }
-
-

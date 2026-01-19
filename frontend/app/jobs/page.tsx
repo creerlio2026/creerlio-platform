@@ -157,7 +157,10 @@ export default function JobsPage() {
 
   const handleApply = async (jobId: string) => {
     if (!isAuthenticated || !userId) {
-      router.push('/login?redirect=/jobs')
+      alert(
+        'You cannot apply unless you are registered and have created a portfolio. If you already have an account, please sign in.'
+      )
+      router.push('/login/talent?mode=signin&redirect=/jobs')
       return
     }
 
@@ -171,7 +174,7 @@ export default function JobsPage() {
         .maybeSingle()
 
       if (profileError || !talentProfile) {
-        alert('Please complete your talent profile before applying to jobs.')
+        alert('Please create a Portfolio before applying to jobs.')
         router.push('/dashboard/talent/edit')
         return
       }
@@ -222,53 +225,105 @@ export default function JobsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="sticky top-0 z-50 backdrop-blur bg-slate-950/70 border-b border-white/10">
+      <header className="sticky top-0 z-50 bg-black border-0">
         <div className="max-w-7xl mx-auto px-8 py-4">
           <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-blue-400 transition-colors">
+            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-[#20C997] transition-colors">
               Creerlio
             </Link>
-            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
-              <Link href="/" className="hover:text-blue-400 transition-colors">Home</Link>
-              <Link href="/jobs" className="hover:text-blue-400 transition-colors text-blue-400">Jobs</Link>
+            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-white">
+              <Link href="/about" className="hover:text-[#20C997] transition-colors">About</Link>
+              <Link href="/#talent" className="hover:text-[#20C997] transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-[#20C997] transition-colors">Business</Link>
+              <Link href="/search" className="hover:text-[#20C997] transition-colors">Search</Link>
+              <Link href="/jobs" className="hover:text-[#20C997] transition-colors text-[#20C997]">Jobs</Link>
+              {isAuthenticated && (
+                <>
+                  <Link href="/dashboard/talent" className="hover:text-[#20C997] transition-colors">Dashboard</Link>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await supabase.auth.signOut()
+                      router.refresh()
+                    }}
+                    className="hover:text-[#20C997] transition-colors text-left"
+                  >
+                    Sign out
+                  </button>
+                </>
+              )}
             </nav>
-            <Link
-              href="/dashboard/business"
-              className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
-            >
-              Business Dashboard
-            </Link>
+
+            <div className="flex gap-3">
+              {!isAuthenticated ? (
+                <>
+                  <Link
+                    href="/login/talent?mode=signup&redirect=/dashboard/talent"
+                    className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+                  >
+                    Create Talent Account
+                  </Link>
+                  <Link
+                    href="/login/business?mode=signup&redirect=/dashboard/business"
+                    className="px-4 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+                  >
+                    Create Business Account
+                  </Link>
+                  <Link
+                    href="/login/talent?mode=signin&redirect=/dashboard/talent"
+                    className="px-5 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+                  >
+                    Sign In
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/dashboard/talent"
+                    className="px-5 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+                  >
+                    Talent Dashboard
+                  </Link>
+                  <Link
+                    href="/dashboard/business"
+                    className="px-5 py-2 rounded-lg bg-[#20C997] hover:bg-[#1DB886] font-semibold text-sm text-white transition-colors"
+                  >
+                    Business Dashboard
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-8 py-12">
-        <h1 className="text-4xl font-bold text-white mb-8">Job Listings</h1>
+        <h1 className="text-4xl font-bold text-gray-900 mb-8">Job Listings</h1>
 
         {/* Filters */}
         <div className="dashboard-card rounded-xl p-6 mb-8">
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Search Keywords</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Search Keywords</label>
               <input
                 type="text"
                 name="keyword"
                 value={filters.keyword}
                 onChange={handleFilterChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 placeholder="Job title, skills, etc."
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Location</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
               <input
                 type="text"
                 name="location"
                 value={filters.location}
                 onChange={handleFilterChange}
-                className="w-full px-4 py-3 bg-white border border-blue-500/20 rounded-lg text-black placeholder-gray-400 focus:outline-none focus:border-blue-500"
+                className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500"
                 placeholder="City, State, or Country"
               />
             </div>
@@ -276,7 +331,7 @@ export default function JobsPage() {
         </div>
 
         {jobsError && (
-          <div className="mb-6 border border-amber-500/30 bg-amber-500/10 text-amber-200 rounded-lg p-4">
+          <div className="mb-6 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg p-4">
             {jobsError}
           </div>
         )}
@@ -292,8 +347,8 @@ export default function JobsPage() {
               <div key={job.id} className="dashboard-card rounded-xl p-6 hover:border-blue-500/50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <h2 className="text-2xl font-bold text-white mb-2">{job.title}</h2>
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-400 mb-4">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">{job.title}</h2>
+                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-4">
                       {job.location && (
                         <span className="flex items-center gap-1">
                           📍 {job.location}
@@ -303,24 +358,24 @@ export default function JobsPage() {
                         <span className="capitalize">{job.employment_type}</span>
                       )}
                       {job.remote_allowed && (
-                        <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded">Remote</span>
+                        <span className="px-2 py-1 bg-green-50 text-green-600 border border-green-200 rounded">Remote</span>
                       )}
                       {formatSalary(job) && (
                         <span>{formatSalary(job)}</span>
                       )}
                     </div>
                     {job.description && (
-                      <p className="text-gray-300 mb-4 line-clamp-2">{job.description}</p>
+                      <p className="text-gray-700 mb-4 line-clamp-2">{job.description}</p>
                     )}
                     {job.required_skills && job.required_skills.length > 0 && (
                       <div className="flex flex-wrap gap-2 mb-4">
                         {job.required_skills.slice(0, 5).map((skill, idx) => (
-                          <span key={idx} className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-sm">
+                          <span key={idx} className="px-3 py-1 bg-blue-50 text-blue-600 border border-blue-200 rounded-full text-sm">
                             {skill}
                           </span>
                         ))}
                         {job.required_skills.length > 5 && (
-                          <span className="px-3 py-1 text-gray-400 text-sm">
+                          <span className="px-3 py-1 text-gray-600 text-sm">
                             +{job.required_skills.length - 5} more
                           </span>
                         )}
@@ -332,7 +387,7 @@ export default function JobsPage() {
                       <div className="text-center">
                         <button
                           disabled
-                          className="px-6 py-3 bg-green-500/20 text-green-400 rounded-lg font-semibold border border-green-500/50 cursor-not-allowed"
+                          className="px-6 py-3 bg-green-50 text-green-600 rounded-lg font-semibold border border-green-200 cursor-not-allowed"
                         >
                           Applied
                         </button>
@@ -342,14 +397,14 @@ export default function JobsPage() {
                       <button
                         onClick={() => handleApply(job.id)}
                         disabled={applyingJobId === job.id}
-                        className="px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {applyingJobId === job.id ? 'Applying...' : 'Apply'}
                       </button>
                     ) : (
                       <Link
                         href="/dashboard/talent"
-                        className="inline-block px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors text-center"
+                        className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors text-center"
                       >
                         Apply Now
                       </Link>
@@ -361,7 +416,7 @@ export default function JobsPage() {
           </div>
         ) : (
           <div className="dashboard-card rounded-xl p-12 text-center">
-            <p className="text-gray-400 text-lg mb-4">No jobs found</p>
+            <p className="text-gray-600 text-lg mb-4">No jobs found</p>
             <p className="text-gray-500">Try adjusting your filters or check back later.</p>
           </div>
         )}

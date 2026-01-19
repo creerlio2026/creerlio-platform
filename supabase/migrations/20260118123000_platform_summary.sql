@@ -1,0 +1,61 @@
+-- Creerlio Platform Summary (Attachment)
+-- This file is an informational attachment for copying. No schema changes are made.
+--
+-- Overview
+-- Creerlio is a dual‑sided talent and business platform that enables public discovery,
+-- structured portfolios, and permissioned connections. It provides:
+-- - Public discovery of businesses and jobs.
+-- - Talent portfolios with verified artifacts and controlled visibility.
+-- - Business profiles with branded content and job postings.
+-- - Connection workflows that gate contact and collaboration.
+--
+-- Core Personas
+-- 1) Talent
+--    - Create a portfolio (skills, projects, experience, attachments).
+--    - Search businesses and jobs.
+--    - Request connections to businesses.
+--    - Manage privacy and visibility of portfolio sections.
+--
+-- 2) Business
+--    - Create a business profile with branding, mission, and media.
+--    - Post job vacancies.
+--    - Review connection requests from talent.
+--    - Maintain public content while protecting internal controls.
+--
+-- 3) Public / Unregistered
+--    - Browse businesses and jobs.
+--    - View business profiles in read‑only mode.
+--    - Connect intent is gated behind registration and talent portfolio creation.
+--
+-- Discovery and Search
+-- - Search supports businesses, jobs, and talent (role‑based access).
+-- - Business search returns public profiles for discovery.
+-- - Map search shows a basic overview; identity remains protected until allowed.
+--
+-- Business Profiles
+-- - Public profiles are read‑only for non‑logged‑in users.
+-- - Logged‑in talent see the same profile layout with connection actions.
+-- - Logged‑in business owners can edit their profile and manage content.
+-- - Media includes banner, logo, galleries, videos, and documents.
+--
+-- Portfolios and Attachments
+-- - Talent portfolios include sections (about, experience, education, projects, etc.).
+-- - Attachments are stored and rendered with secure access rules.
+-- - Visibility settings allow selective disclosure of items.
+--
+-- Connections
+-- - Talent requests initiate connections with businesses.
+-- - Businesses can respond to connection requests within the platform.
+-- - Contact and deeper engagement require a verified connection path.
+--
+-- Jobs
+-- - Businesses can publish jobs with status and location data.
+-- - Job listings are discoverable publicly.
+-- - Applying requires authenticated talent and a portfolio.
+--
+-- Governance and Safety
+-- - Public pages are permission‑safe and do not expose admin controls.
+-- - Private controls are only rendered for authenticated owners.
+-- - Terms of use and policies apply to both Talent and Business.
+--
+-- End of Summary

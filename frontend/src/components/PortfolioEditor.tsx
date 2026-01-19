@@ -231,7 +231,9 @@ function CollapsibleTextarea({
       }
     } catch (error: any) {
       console.error('Error polishing text:', error)
-      alert(error.message || 'Failed to polish text. Please check your OpenAI API key is configured.')
+      const msg = String(error?.message || 'Failed to polish text. Please check your OpenAI API key is configured.')
+      const safeMsg = msg.replace(/sk-[a-zA-Z0-9_-]+/g, 'sk-***')
+      alert(safeMsg)
     } finally {
       setIsPolishing(false)
     }

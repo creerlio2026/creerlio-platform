@@ -6,12 +6,11 @@ import { Header } from '@/components/peopleselect/Header'
 import { Footer } from '@/components/peopleselect/Footer'
 import { HeroSection } from '@/components/peopleselect/HeroSection'
 import { HowItWorksSection } from '@/components/peopleselect/HowItWorksSection'
+import { ImageBanner } from '@/components/peopleselect/ImageBanner'
 
 export default function PeopleSelectHomePage() {
   const [scrollProgress, setScrollProgress] = useState(0)
   
-  // A/B Testing: Change variant here or use feature flag
-  // Variants: 'A' | 'B' | 'C'
   const heroVariant: 'A' | 'B' | 'C' = 'A'
 
   return (
@@ -19,177 +18,217 @@ export default function PeopleSelectHomePage() {
       <Header />
 
       <main>
-        {/* Hero Section with Animation and Toggle */}
         <HeroSection 
           variant={heroVariant}
           onScrollProgress={setScrollProgress}
         />
 
-        {/* Three Core Business Drivers */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-white">
+        {/* Core Model */}
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-white">
           <div className="max-w-6xl mx-auto">
-            <div className="grid md:grid-cols-3 gap-8 mb-12">
-              {/* Driver 1 */}
-              <div className="bg-gray-50 p-8 rounded-lg border border-gray-200 hover:border-blue-600 transition-colors">
-                <h2 className="text-3xl font-bold text-black mb-4">See the full professional — not just a CV.</h2>
-                <p className="text-lg text-gray-600 leading-relaxed mb-4">
-                  Experience, projects, credentials, and context — all in one profile.
-                </p>
-                <p className="text-gray-600 leading-relaxed">
-                  Businesses see the whole professional: detailed experience across roles, real work examples, education and qualifications, licences with documents, referee insight, supporting media, and consultant context. Not summaries. The full picture.
-                </p>
+            <div className="text-center mb-10">
+              <h2 className="text-4xl font-bold text-black mb-4">A Recruitment Agency—Rebuilt</h2>
+              <p className="text-xl text-gray-600 leading-relaxed max-w-3xl mx-auto">
+                PeopleSelect is a recruitment agency powered by Creerlio. We still manage recruitment, run interviews, vet candidates, consult businesses, and place talent. We simply do it in a new way.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-12 mb-10">
+              <div className="bg-gray-50 p-8 rounded-lg border border-gray-200">
+                <h3 className="text-2xl font-bold text-black mb-4">What We Don't Use</h3>
+                <ul className="space-y-3 text-gray-600">
+                  <li className="flex items-start gap-3">
+                    <span className="text-red-500 mt-1">×</span>
+                    <span>Resumes and CVs</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-red-500 mt-1">×</span>
+                    <span>ATS systems</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-red-500 mt-1">×</span>
+                    <span>Algorithmic matching</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-red-500 mt-1">×</span>
+                    <span>Job boards</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-red-500 mt-1">×</span>
+                    <span>Automated ranking or scoring</span>
+                  </li>
+                </ul>
               </div>
 
-              {/* Driver 2 */}
-              <div className="bg-gray-50 p-8 rounded-lg border border-gray-200 hover:border-blue-600 transition-colors">
-                <h2 className="text-3xl font-bold text-black mb-4">Make better hiring decisions.</h2>
-                <p className="text-lg text-gray-600 leading-relaxed mb-4">
-                  Rich professional profiles and consultant insight replace CV guesswork.
-                </p>
-                <p className="text-gray-600 leading-relaxed">
-                  CVs force hiring managers to guess. Talent Portfolios replace guesswork with clarity. Fewer interviews needed. Stronger shortlists. Clearer alignment from the start. Consultant-backed recommendations based on full context, not employment history alone.
-                </p>
-              </div>
-
-              {/* Driver 3 */}
-              <div className="bg-gray-50 p-8 rounded-lg border border-gray-200 hover:border-blue-600 transition-colors">
-                <h2 className="text-3xl font-bold text-black mb-4">Reduce failed hires.</h2>
-                <p className="text-lg text-gray-600 leading-relaxed mb-4">
-                  Because alignment is visible before interviews begin.
-                </p>
-                <p className="text-gray-600 leading-relaxed">
-                  Failed hires usually result from missing context. Portfolios surface alignment early: intent, preferences, cultural fit, and capability depth. Businesses see motivation, availability, and career goals before interviews. Better alignment means better retention.
-                </p>
+              <div className="bg-blue-50 p-8 rounded-lg border border-blue-200">
+                <h3 className="text-2xl font-bold text-black mb-4">What We Do Use</h3>
+                <ul className="space-y-3 text-gray-700">
+                  <li className="flex items-start gap-3">
+                    <span className="text-blue-600 mt-1 font-bold">✓</span>
+                    <span>Creerlio's discovery platform</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-blue-600 mt-1 font-bold">✓</span>
+                    <span>Rich talent portfolios</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-blue-600 mt-1 font-bold">✓</span>
+                    <span>Business presence pages</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-blue-600 mt-1 font-bold">✓</span>
+                    <span>Genuine interest before recruitment</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-blue-600 mt-1 font-bold">✓</span>
+                    <span>Full human-led recruitment process</span>
+                  </li>
+                </ul>
               </div>
             </div>
 
             <div className="text-center pt-8 border-t border-gray-200">
               <p className="text-xl text-gray-700 font-medium">
-                Recruitment built on better information — not better advertising.
+                Discovery first. Recruitment second. Human-led always.
               </p>
             </div>
           </div>
         </section>
 
-        {/* How It Works Section with Scroll Transition */}
+        {/* Image Banner: Real Connections */}
+        <ImageBanner
+          src="/peopleselect-real-connections.jpg"
+          alt="Real connections come from real choice - professional handshake representing human-led connections"
+          heading="Real connections come from real choice."
+          subheading="Talent chooses where to connect and engage."
+          overlay="gradient"
+        />
+
         <HowItWorksSection scrollProgress={scrollProgress} />
 
-        {/* Differentiation from Traditional Recruitment */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
+        {/* The Difference */}
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-gray-50">
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-4xl font-bold text-black mb-8 text-center">Not Job Boards. Not CV Stacks.</h2>
+            <h2 className="text-4xl font-bold text-black mb-8 text-center">Not Job Boards. Not Resumes. Not ATS Systems.</h2>
             
             <div className="space-y-8">
               <div className="bg-white p-8 rounded-lg border-l-4 border-red-500">
-                <h3 className="text-2xl font-bold text-black mb-4">What Traditional Recruitment Delivers</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">What Traditional Recruitment Uses</h3>
                 <ul className="space-y-2 text-gray-600">
-                  <li>• Job board applications and recycled resumes</li>
-                  <li>• CV stacks with limited context</li>
-                  <li>• Reactive advertising and high-volume shortlisting</li>
-                  <li>• Employment history without depth</li>
-                  <li>• Decisions based on summaries, not evidence</li>
+                  <li>• Job board applications and resume stacks</li>
+                  <li>• ATS systems filtering by keywords</li>
+                  <li>• Reactive advertising and mass responses</li>
+                  <li>• Static resumes from months ago</li>
+                  <li>• Algorithmic matching and scoring</li>
+                  <li>• Decisions based on limited information</li>
                 </ul>
               </div>
 
               <div className="bg-white p-8 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-2xl font-bold text-black mb-4">What People Select Delivers</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">What PeopleSelect Uses</h3>
                 <p className="text-gray-600 leading-relaxed mb-4">
-                  Businesses are not sent resumes. They are presented with curated Talent Portfolios — rich professional profiles that include:
+                  Powered by Creerlio, we work with rich talent portfolios and business presence pages. Instead of resumes, businesses see complete portfolios with:
                 </p>
                 <ul className="space-y-3 text-gray-600 mb-4">
                   <li className="flex items-start gap-3">
                     <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Detailed experience</strong> across roles and industries, shown in context</span>
+                    <span><strong className="text-black">Real portfolios</strong> that evolve with careers, not static documents</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Projects and real work examples</strong> demonstrating capability</span>
+                    <span><strong className="text-black">Discovery and exploration</strong> before recruitment begins</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Education, qualifications, and licences</strong> with supporting documents</span>
+                    <span><strong className="text-black">Genuine interest</strong> from talent who choose to connect</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Referee insight</strong> with contextual commentary</span>
+                    <span><strong className="text-black">Full human-led process</strong> — we still interview, vet, consult, and place</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Supporting media</strong> — images, videos, and attachments</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Skills shown in context</strong>, not just listed</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Availability, intent, and preferences</strong> — alignment indicators</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-blue-600 mt-1 font-bold">•</span>
-                    <span><strong className="text-black">Consultant insight</strong> layered on top, explaining fit and alignment</span>
+                    <span><strong className="text-black">Business storytelling</strong> that attracts aligned people</span>
                   </li>
                 </ul>
                 <p className="text-gray-600 leading-relaxed font-medium">
-                  This provides more information than any traditional recruitment process. Businesses see evidence, not summaries. Context, not just credentials. Alignment, not just employment history.
+                  This provides better information than resumes and ATS systems. Businesses see who people are, not just what they did. We still do the full recruitment work — we just start with discovery, not applications.
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* What We Do */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div className="max-w-3xl mx-auto text-center mb-16">
-            <h2 className="text-4xl font-bold text-black mb-4">What We Do</h2>
+        {/* Image Banner: People Before Resumes */}
+        <ImageBanner
+          src="/peopleselect-people-before-resumes.jpg"
+          alt="People before resumes - professional conversation representing human-first recruitment"
+          heading="People before resumes."
+          subheading="Discovery first, hiring second."
+          overlay="gradient"
+        />
+
+        {/* How PeopleSelect Works */}
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-white">
+          <div className="max-w-3xl mx-auto text-center mb-10">
+            <h2 className="text-4xl font-bold text-black mb-4">How PeopleSelect Works</h2>
             <p className="text-lg text-gray-600">
-              PeopleSelect provides human recruitment assistance for businesses using Creerlio. We help with vetting, screening, hiring processes, and placement — when you want support.
+              A recruitment agency powered by Creerlio's discovery platform. We still manage the full recruitment process — we just do it differently.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto mb-12">
-            <div className="bg-white p-8 rounded-lg border border-gray-200">
-              <h3 className="text-2xl font-bold text-black mb-4">Built on Creerlio</h3>
+          <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto mb-8">
+            <div className="bg-gray-50 p-8 rounded-lg border border-gray-200">
+              <h3 className="text-2xl font-bold text-black mb-4">Powered by Creerlio</h3>
               <p className="text-gray-600 leading-relaxed mb-4">
-                Creerlio is a discovery platform where talent builds portfolios and explores businesses. Businesses build their presence and attract interest. All connections are human-initiated and choice-driven.
+                Creerlio is a discovery platform. Talent builds portfolios and explores businesses. Businesses build their presence and attract interest. All connections are human-initiated and choice-driven.
               </p>
               <Link href="/peopleselect/about" className="text-blue-600 hover:text-blue-700 font-semibold">
                 Learn about Creerlio →
               </Link>
             </div>
 
-            <div className="bg-white p-8 rounded-lg border border-gray-200">
-              <h3 className="text-2xl font-bold text-black mb-4">Supported by PeopleSelect</h3>
+            <div className="bg-gray-50 p-8 rounded-lg border border-gray-200">
+              <h3 className="text-2xl font-bold text-black mb-4">PeopleSelect: The Recruitment Agency</h3>
               <p className="text-gray-600 leading-relaxed mb-4">
-                PeopleSelect is the human recruitment layer. We help businesses who want assistance with vetting, screening, hiring processes, and placement. We provide support — we don't automate decisions.
+                We're a real recruitment agency. We manage recruitment, run interviews, vet candidates, consult businesses, and place talent. We use Creerlio instead of resumes and ATS systems. But we still do the full recruitment work.
               </p>
-              <Link href="/peopleselect/for-employers" className="text-blue-600 hover:text-blue-700 font-semibold">
-                Learn about our support →
+              <Link href="/peopleselect/how-it-works" className="text-blue-600 hover:text-blue-700 font-semibold">
+                See how we work →
               </Link>
             </div>
           </div>
 
           <div className="max-w-3xl mx-auto text-center">
             <p className="text-lg text-gray-600 italic">
-              Many businesses use Creerlio directly. PeopleSelect is optional — for businesses who want human support during the hiring process.
+              Creerlio is not a recruitment agency. PeopleSelect is. We're powered by Creerlio's discovery platform, but we still manage the full recruitment process.
             </p>
           </div>
         </section>
 
-        {/* How This Works */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20">
+        {/* Image Banner: Human Yes */}
+        <ImageBanner
+          src="/peopleselect-human-yes.jpg"
+          alt="Automated? No. Human? Yes. - smiling professional representing human-led recruitment"
+          heading="Automated? No."
+          subheading="Human? Yes."
+          overlay="gradient"
+        />
+
+        {/* What We Do */}
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-gray-50">
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-4xl font-bold text-black mb-12 text-center">How This Works</h2>
+            <h2 className="text-4xl font-bold text-black mb-8 text-center">We Still Do the Full Recruitment Work</h2>
             
-            <div className="space-y-12">
+            <div className="space-y-8">
               <div className="flex gap-8">
                 <div className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
                   1
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold text-black mb-3">Talent Builds Portfolios</h3>
+                  <h3 className="text-2xl font-bold text-black mb-3">Discovery and Exploration</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    Professionals create rich portfolios that represent their career: experience, projects, credentials, documents, referees, and context. These portfolios contain significantly more information than CVs. Talent controls visibility and chooses connections.
+                    Talent builds portfolios and explores businesses on Creerlio. Businesses build their presence and attract interest. This happens before recruitment begins. Genuine interest, not applications.
                   </p>
                 </div>
               </div>
@@ -199,9 +238,9 @@ export default function PeopleSelectHomePage() {
                   2
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold text-black mb-3">Businesses Review Portfolios, Not Resumes</h3>
+                  <h3 className="text-2xl font-bold text-black mb-3">PeopleSelect Manages Recruitment</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    Businesses are not sent CVs. They are presented with curated Talent Portfolios — rich professional profiles with experience, evidence, context, and consultant insight. This provides more information than any traditional recruitment process.
+                    We review portfolios instead of resumes. We consult with businesses to understand needs. We interview and vet candidates. We facilitate connections and guide decisions. We still do all the recruitment work — just with portfolios, not resumes.
                   </p>
                 </div>
               </div>
@@ -211,80 +250,32 @@ export default function PeopleSelectHomePage() {
                   3
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold text-black mb-3">Better Information Leads to Better Decisions</h3>
+                  <h3 className="text-2xl font-bold text-black mb-3">Human-Led Placement</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    With full professional context, businesses make better hiring decisions. Fewer interviews needed. Stronger shortlists. Clearer alignment from the start. Reduced failed hires because alignment is visible before interviews begin.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-8">
-                <div className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
-                  4
-                </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-black mb-3">People Select Manages the Process</h3>
-                  <p className="text-gray-600 leading-relaxed">
-                    People Select consultants do the work. We manage, assess, guide, and recommend. We stand behind the recommendation. We manage the process end-to-end. The system enables better insight, but People Select owns the outcome.
+                    We place candidates. We support onboarding. We manage the full recruitment process. We're a real recruitment agency — we just use Creerlio instead of resumes and ATS systems.
                   </p>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
 
-        {/* Role of People Select */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-4xl font-bold text-black mb-8 text-center">People Select Does the Work</h2>
-            <p className="text-lg text-gray-600 text-center mb-12">
-              We remain your recruitment partner. We manage, assess, guide, and recommend. The system enables better insight, but People Select owns the outcome.
-            </p>
-
-            <div className="space-y-6">
-              <div className="bg-white p-8 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-2xl font-bold text-black mb-4">We Do the Work</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  People Select consultants work with businesses to understand needs, review portfolios, assess fit, and guide decisions. We work with talent to build portfolios and understand career goals. We do the recruitment work — not systems, not algorithms.
-                </p>
-              </div>
-
-              <div className="bg-white p-8 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-2xl font-bold text-black mb-4">We Stand Behind the Recommendation</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  When People Select presents a Talent Portfolio, we stand behind that recommendation. We've assessed fit, verified context, and confirmed alignment. We own the outcome, not just the process. Every recommendation comes with consultant insight explaining why this professional fits this business.
-                </p>
-              </div>
-
-              <div className="bg-white p-8 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-2xl font-bold text-black mb-4">We Manage the Process End-to-End</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  We coordinate conversations, facilitate assessments, and guide decisions. We ensure both sides have the information they need. We manage the recruitment process from start to finish. The system enables better insight, but People Select manages the process.
-                </p>
-              </div>
-            </div>
-
-            <div className="text-center mt-12">
-              <Link
-                href="/peopleselect/faq"
-                className="text-blue-600 hover:text-blue-700 font-semibold text-lg"
-              >
-                Read our FAQ to learn more →
-              </Link>
+            <div className="mt-8 bg-white p-8 rounded-lg border-l-4 border-blue-600">
+              <h3 className="text-2xl font-bold text-black mb-4">The Key Difference</h3>
+              <p className="text-gray-600 leading-relaxed">
+                We start with discovery and exploration. Talent chooses businesses. Businesses attract aligned people. Then we manage the recruitment process — interviews, vetting, consultation, placement. We still do everything a recruitment agency does. We just don't start with job boards and resumes.
+              </p>
             </div>
           </div>
         </section>
 
         {/* Trusted By */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20">
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-white">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-4xl font-bold text-black mb-4">Trusted by Growing Australian Businesses</h2>
-            <p className="text-lg text-gray-600 mb-12">
-              We work with SMEs, enterprise teams, and government agencies who value quality over speed and relationships over transactions.
+            <p className="text-lg text-gray-600 mb-8">
+              We work with businesses who value quality over speed, relationships over transactions, and discovery over applications.
             </p>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 items-center opacity-60">
-              {/* Placeholder for client logos */}
               <div className="h-16 bg-gray-200 rounded"></div>
               <div className="h-16 bg-gray-200 rounded"></div>
               <div className="h-16 bg-gray-200 rounded"></div>
@@ -294,24 +285,24 @@ export default function PeopleSelectHomePage() {
         </section>
 
         {/* CTA Section */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-900 text-white">
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-12 bg-gray-900 text-white">
           <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-4xl font-bold mb-6">Ready to Explore a Different Way?</h2>
+            <h2 className="text-4xl font-bold mb-6">Ready to Experience Recruitment Rebuilt?</h2>
             <p className="text-xl text-gray-300 mb-10">
-              Discover how Creerlio enables human-led recruitment. Learn how PeopleSelect provides support when you need it.
+              Discovery first. Recruitment second. Human-led always. Powered by Creerlio, managed by PeopleSelect.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
                 href="/peopleselect/for-employers"
                 className="inline-block px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-lg"
               >
-                For Businesses
+                Build Your Business Presence
               </Link>
               <Link
                 href="/peopleselect/for-candidates"
                 className="inline-block px-8 py-4 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors font-semibold text-lg"
               >
-                For Talent
+                Explore Businesses
               </Link>
             </div>
           </div>

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { Header } from '@/components/peopleselect/Header'
 import { Footer } from '@/components/peopleselect/Footer'
+import { ImageBanner } from '@/components/peopleselect/ImageBanner'
 
 export default function ForEmployersPage() {
   return (
@@ -10,198 +11,141 @@ export default function ForEmployersPage() {
       <Header />
 
       <main>
-        {/* Hero */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div className="max-w-4xl mx-auto text-center">
-            <h1 className="text-5xl font-bold text-black mb-6">For Businesses</h1>
-            <p className="text-xl text-gray-600">
-              Build your presence. Showcase your story. Attract talent who discovers you. PeopleSelect provides human support when you need it.
-            </p>
-          </div>
-        </section>
+        {/* Hero Image Banner */}
+        <ImageBanner
+          src="/peopleselect-attract-people.jpg"
+          alt="Attract people, don't sort through resumes - professional reviewing portfolios on tablet representing portfolio-based recruitment"
+          heading="Attract people, don't sort through resumes."
+          subheading="Showcase who you are and draw in real interest."
+          overlay="gradient"
+          priority={true}
+        />
 
-        {/* Who We Work With */}
         <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20">
           <div className="space-y-12">
             <div>
-              <h2 className="text-4xl font-bold text-black mb-6">Build Your Presence on Creerlio</h2>
+              <h2 className="text-4xl font-bold text-black mb-6">Build Your Business Presence on Creerlio</h2>
               <p className="text-lg text-gray-600 leading-relaxed mb-6">
                 On Creerlio, businesses build their presence and tell their story. You showcase your culture, values, opportunities, and what makes you unique. Talent discovers and explores you. Interest flows both ways — human-initiated, not automated.
               </p>
               <p className="text-lg text-gray-600 leading-relaxed">
-                You build a business profile that represents who you are. This becomes your recruitment presence — not a one-off job ad, but a living profile that attracts aligned talent. Many businesses use Creerlio directly. PeopleSelect is optional — for businesses who want human support during the hiring process.
+                You build a <strong className="text-black">business presence</strong> that represents who you are. This includes your story, culture, values, growth paths, and opportunities. This becomes your recruitment presence — not a one-off job ad, but a living profile that attracts aligned talent.
               </p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-8">
               <div className="bg-gray-50 p-8 rounded-lg">
-                <h3 className="text-2xl font-bold text-black mb-4">Small to Medium Enterprises</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">You Attract Aligned People</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Growing businesses need hires who fit culturally and contribute immediately. Our relationship-based approach ensures you get professionals who understand your business and align with your values.
+                  Talent explores businesses on Creerlio. They see your story, understand your culture, and discover opportunities. When they're interested, they choose to connect. You receive genuine interest from people who chose you.
                 </p>
               </div>
 
               <div className="bg-gray-50 p-8 rounded-lg">
-                <h3 className="text-2xl font-bold text-black mb-4">Enterprise Teams</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">You Don't Sort Through Resume Spam</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Large organisations need consistent, high-quality talent across teams. Our network and relationship model scale to deliver placements that meet enterprise standards while maintaining personal attention.
+                  You review portfolios instead of resumes. You see complete professional context, not just employment history. You choose which portfolios to engage with. No ATS filters. No keyword matching. Human judgment, not automated systems.
                 </p>
               </div>
 
               <div className="bg-gray-50 p-8 rounded-lg">
-                <h3 className="text-2xl font-bold text-black mb-4">Government Agencies</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">You Receive Genuine Interest</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Public sector recruitment requires thorough assessment and cultural alignment. Our approach ensures placements meet compliance requirements while delivering professionals committed to public service.
+                  Talent explores businesses and chooses who to connect with. You receive interest from people who discovered you and chose you. Genuine interest, not applications into a void.
                 </p>
               </div>
 
               <div className="bg-gray-50 p-8 rounded-lg">
-                <h3 className="text-2xl font-bold text-black mb-4">Project-Based Teams</h3>
+                <h3 className="text-2xl font-bold text-black mb-4">You Don't Rely on ATS Filters</h3>
                 <p className="text-gray-600 leading-relaxed">
-                  Contract and project teams need professionals ready to start immediately. Our network activation model delivers qualified talent quickly, without compromising on quality or cultural fit.
+                  We don't use ATS systems. We don't filter by keywords. We don't rank or score candidates algorithmically. You review portfolios and make decisions based on human judgment, not automated systems.
                 </p>
               </div>
             </div>
-          </div>
-        </section>
 
-        {/* Ideal Clients */}
-        <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div>
-            <h2 className="text-4xl font-bold text-black mb-6">Ideal Clients</h2>
-            <p className="text-lg text-gray-600 leading-relaxed mb-8">
-              Our approach works best for businesses that meet certain criteria. We're upfront about fit because we want successful, long-term partnerships.
-            </p>
+            {/* Mid-Page Image Banner */}
+            <ImageBanner
+              src="/peopleselect-real-connections.jpg"
+              alt="Real connections come from real choice - professional handshake representing human-led business connections"
+              heading="Real connections come from real choice."
+              subheading="Talent chooses where to connect and engage."
+              overlay="gradient"
+            />
 
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-xl font-bold text-black mb-3">Value Quality Over Speed</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  If you need someone in the role tomorrow, traditional job ads might be faster. But if you value quality, cultural fit, and long-term success, our relationship-based approach delivers better outcomes.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-xl font-bold text-black mb-3">Understand the Investment</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  Our approach requires time upfront to understand your business and build relationships. This investment pays off in better matches, faster future placements, and a stronger talent pipeline.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-xl font-bold text-black mb-3">Think Long-Term</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  We're building your long-term talent strategy, not just filling immediate roles. Ideal clients see the value in ongoing relationships and compounding network advantages.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border-l-4 border-blue-600">
-                <h3 className="text-xl font-bold text-black mb-3">Hire Regularly</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  Our model works best when you hire multiple roles over time. The network we build becomes more valuable with each placement, creating compounding returns on the initial relationship investment.
-                </p>
-              </div>
+            <div className="bg-blue-50 p-8 rounded-lg border-l-4 border-blue-600">
+              <h3 className="text-2xl font-bold text-black mb-4">PeopleSelect Manages Recruitment</h3>
+              <p className="text-gray-700 leading-relaxed mb-4">
+                Many businesses use Creerlio directly. PeopleSelect is a recruitment agency that works with businesses who want us to manage the full recruitment process.
+              </p>
+              <p className="text-gray-700 leading-relaxed mb-4">
+                We review portfolios instead of resumes. We interview candidates. We vet backgrounds. We consult with businesses to understand needs and assess fit. We facilitate conversations and guide decisions. We place candidates. We still do everything a recruitment agency does.
+              </p>
+              <p className="text-gray-700 leading-relaxed">
+                The difference is we use Creerlio's discovery platform instead of job boards and ATS systems. We work with portfolios instead of resumes. But we still manage the full recruitment process.
+              </p>
             </div>
-          </div>
-        </section>
 
-        {/* When PeopleSelect Is Right */}
-        <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20">
-          <div>
-            <h2 className="text-4xl font-bold text-black mb-6">When PeopleSelect Is the Right Fit</h2>
-            
-            <div className="space-y-6 mb-12">
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-6 h-6 bg-blue-600 rounded-full mt-1"></div>
-                <div>
-                  <h3 className="text-xl font-bold text-black mb-2">You Need Quality Hires</h3>
+            <div>
+              <h2 className="text-4xl font-bold text-black mb-6">How It Works for Businesses</h2>
+              <div className="space-y-6">
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h3 className="text-xl font-bold text-black mb-3">1. Build Your Presence on Creerlio</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    When cultural fit and long-term success matter more than filling a role quickly, our relationship-based approach delivers better matches.
+                    Create your business presence on Creerlio. Showcase your story, culture, values, and opportunities. This becomes your recruitment presence — a living profile that attracts aligned talent.
                   </p>
                 </div>
-              </div>
 
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-6 h-6 bg-blue-600 rounded-full mt-1"></div>
-                <div>
-                  <h3 className="text-xl font-bold text-black mb-2">You Hire Multiple Roles</h3>
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h3 className="text-xl font-bold text-black mb-3">2. Attract Interest</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    If you're building a team or hiring regularly, our network model creates compounding value. Each placement strengthens future hiring.
+                    Talent explores businesses on Creerlio. They discover you, understand your culture, and choose to connect. You receive genuine interest from people who chose you.
                   </p>
                 </div>
-              </div>
 
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-6 h-6 bg-blue-600 rounded-full mt-1"></div>
-                <div>
-                  <h3 className="text-xl font-bold text-black mb-2">You Value Relationships</h3>
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h3 className="text-xl font-bold text-black mb-3">3. Review Portfolios</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    When you want a recruitment partner who understands your business and maintains ongoing relationships, our approach aligns with your values.
+                    You review portfolios instead of resumes. You see complete professional context, not just employment history. You choose which portfolios to engage with. Human judgment, not ATS filters.
                   </p>
                 </div>
-              </div>
 
-              <div className="flex gap-4">
-                <div className="flex-shrink-0 w-6 h-6 bg-blue-600 rounded-full mt-1"></div>
-                <div>
-                  <h3 className="text-xl font-bold text-black mb-2">You Want Access to Passive Talent</h3>
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h3 className="text-xl font-bold text-black mb-3">4. PeopleSelect Manages Recruitment</h3>
                   <p className="text-gray-600 leading-relaxed">
-                    If you need professionals who aren't actively job searching, our network and relationship model gives you access to passive talent.
+                    We review portfolios, interview candidates, vet backgrounds, consult on fit, and place talent. We manage the full recruitment process. We still do all the work — we just use portfolios instead of resumes.
+                  </p>
+                </div>
+
+                <div className="bg-gray-50 p-6 rounded-lg">
+                  <h3 className="text-xl font-bold text-black mb-3">5. You Get Human Support</h3>
+                  <p className="text-gray-600 leading-relaxed">
+                    PeopleSelect provides human support throughout the recruitment process. We consult, guide, and facilitate. We manage recruitment — we don't automate it. You get human recruitment support when you need it.
                   </p>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
 
-        {/* When It's Not */}
-        <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div>
-            <h2 className="text-4xl font-bold text-black mb-6">When It's Not</h2>
-            <p className="text-lg text-gray-600 leading-relaxed mb-8">
-              We're honest about when our approach isn't the right fit. Better to say no upfront than deliver a poor experience.
-            </p>
-
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-lg border-l-4 border-gray-400">
-                <h3 className="text-xl font-bold text-black mb-3">One-Off, Urgent Hires</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  If you need someone in a role immediately and this is a one-time hire, traditional job ads might be faster. Our approach requires relationship building that pays off over multiple placements.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border-l-4 border-gray-400">
-                <h3 className="text-xl font-bold text-black mb-3">Very Low-Volume Hiring</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  If you rarely hire, the network investment doesn't compound. Our model works best when you hire regularly and can leverage the ongoing relationships we build.
-                </p>
-              </div>
-
-              <div className="bg-white p-6 rounded-lg border-l-4 border-gray-400">
-                <h3 className="text-xl font-bold text-black mb-3">Commodity Roles</h3>
-                <p className="text-gray-600 leading-relaxed">
-                  For highly standardised roles where skills matching is straightforward and cultural fit is less critical, traditional recruitment may be more cost-effective.
-                </p>
-              </div>
+            <div className="bg-gray-900 text-white p-10 rounded-lg">
+              <h2 className="text-3xl font-bold mb-6">Not Job Boards. Not Resumes. Not ATS Systems.</h2>
+              <p className="text-gray-300 leading-relaxed mb-4">
+                We don't use job boards. We don't use resumes. We don't use ATS systems. We use Creerlio's discovery platform and portfolios. But we still manage the full recruitment process.
+              </p>
+              <p className="text-gray-300 leading-relaxed">
+                Discovery first. Recruitment second. Human-led always. Powered by Creerlio, managed by PeopleSelect.
+              </p>
             </div>
           </div>
-        </section>
 
-        {/* CTA */}
-        <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20">
-          <div className="bg-gray-900 text-white p-12 rounded-lg text-center">
-            <h2 className="text-4xl font-bold mb-4">Ready to Explore a Different Way?</h2>
-            <p className="text-xl text-gray-300 mb-4">
-              Discover how Creerlio enables discovery and exploration. Learn how PeopleSelect provides human support when you need it.
-            </p>
-            <p className="text-lg text-gray-400 mb-8">
-              Not a job board. Not AI matching. Discovery and exploration. Human connections. Choice-driven relationships.
+          <div className="mt-16 text-center">
+            <h2 className="text-3xl font-bold text-black mb-4">Ready to Build Your Presence?</h2>
+            <p className="text-lg text-gray-600 mb-8">
+              Build your business presence on Creerlio. Attract aligned talent. Let PeopleSelect manage the full recruitment process.
             </p>
             <Link
               href="/peopleselect/contact"
-              className="inline-block px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold text-lg"
+              className="inline-block px-8 py-4 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-semibold text-lg"
             >
-              Get in Touch
+              Build Your Business Presence
             </Link>
           </div>
         </section>

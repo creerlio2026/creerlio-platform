@@ -144,20 +144,27 @@ export default function TalentConnectPage({ params }: { params: { business_slug:
             if (!idRes.error && idRes.data) {
               businessData = idRes.data
             } else {
-              businessError = idRes.error
+              businessError = idRes.error || slugRes.error
             }
           } else {
-            // Try querying by ID directly (in case slug is actually an ID)
-            const idRes = await supabase
-              .from('business_profiles')
-              .select('id, business_name, description')
-              .eq('id', slug)
-              .maybeSingle()
-            
-            if (!idRes.error && idRes.data) {
-              businessData = idRes.data
+            // Only try querying by ID if slug looks like a UUID (36 chars with hyphens)
+            // This prevents 400 errors when slug is a text value like "creerlio"
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slug)
+            if (isUUID) {
+              const idRes = await supabase
+                .from('business_profiles')
+                .select('id, business_name, description')
+                .eq('id', slug)
+                .maybeSingle()
+              
+              if (!idRes.error && idRes.data) {
+                businessData = idRes.data
+              } else {
+                businessError = idRes.error || slugRes.error
+              }
             } else {
-              businessError = idRes.error || slugRes.error
+              // Slug is not a valid UUID and slug query failed - return the original error
+              businessError = slugRes.error || new Error(`Business profile with slug "${slug}" not found`)
             }
           }
         }

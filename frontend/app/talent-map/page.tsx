@@ -1,12 +1,18 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import BusinessDiscoveryMap, {type BusinessFeature, type RouteState } from '@/components/BusinessDiscoveryMap'
+
+export const dynamic = 'force-dynamic'
+
+const DEBUG_ENDPOINT = 'http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc'
+const emitDebugLog = (payload: Record<string, unknown>) => {
+  fetch(DEBUG_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+  fetch('/api/debug-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+}
 
 async function saveForRelocation(business) {
   const { error } = await supabase.from('relocation_scenarios').insert({
@@ -98,11 +104,26 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
 
 type MapStyle = 'dark' | 'light' | 'satellite' | 'streets'
 
+const AU_BOUNDS: [[number, number], [number, number]] = [
+  [112.0, -44.0], // SW
+  [154.0, -10.0], // NE
+]
+
 export default function TalentMapPage() {
+  return (
+    <Suspense fallback={null}>
+      <TalentMapPageInner />
+    </Suspense>
+  )
+}
+
+function TalentMapPageInner() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeStyle, setActiveStyle] = useState<MapStyle>('dark')
   const [filtersCollapsed, setFiltersCollapsed] = useState(false)
+  const [panelsCollapsed, setPanelsCollapsed] = useState(false)
+  const [mapResizeTrigger, setMapResizeTrigger] = useState(0)
 
   const [locQuery, setLocQuery] = useState('')
   const [locBusy, setLocBusy] = useState(false)
@@ -115,7 +136,10 @@ export default function TalentMapPage() {
   const [flyTo, setFlyTo] = useState<{ lng: number; lat: number; zoom?: number } | null>(null)
   const [searchCenter, setSearchCenter] = useState<{ lng: number; lat: number; label?: string } | null>(null)
   const SHOW_ALL_KEY = 'creerlio_talent_map_show_all_v1'
-  const [showAllBusinesses, setShowAllBusinesses] = useState<boolean>(false)
+  const [showAllBusinesses, setShowAllBusinesses] = useState<boolean>(true)
+  const [intentStatusFilter, setIntentStatusFilter] = useState<string>('')
+  const [intentCompatibility, setIntentCompatibility] = useState<boolean>(false)
+  const [mapFitBounds, setMapFitBounds] = useState<[[number, number], [number, number]] | null>(null)
 
   const [filters, setFilters] = useState({
     q: '',
@@ -148,7 +172,7 @@ export default function TalentMapPage() {
   }
 
   const [results, setResults] = useState<
-    Array<{ id: string; name: string; slug: string; industries: string[]; lng: number; lat: number; approx?: boolean }>
+    Array<{ id: string; name: string; slug: string; industries: string[]; lng: number; lat: number; approx?: boolean; intent_status?: string | null; intent_visibility?: boolean }>
   >([])
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -232,6 +256,7 @@ export default function TalentMapPage() {
     }
     try {
       const raw = window.localStorage.getItem(SHOW_ALL_KEY)
+      if (raw === '0') setShowAllBusinesses(false)
       if (raw === '1') setShowAllBusinesses(true)
     } catch {
       // ignore
@@ -288,7 +313,8 @@ export default function TalentMapPage() {
       const u = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(qq)}.json`)
       u.searchParams.set('access_token', token)
       u.searchParams.set('limit', '6')
-      u.searchParams.set('types', 'place,locality,neighborhood,postcode,region')
+      // Include 'address' type to support street-level addresses like "6 George Street Sydney"
+      u.searchParams.set('types', 'address,place,locality,neighborhood,postcode,region')
       u.searchParams.set('country', 'AU')
       const res = await fetch(u.toString(), { signal: ac.signal })
       const json: any = await res.json().catch(() => null)
@@ -432,6 +458,9 @@ export default function TalentMapPage() {
   }
 
   function applyLocSuggestion(s: LocSuggestion) {
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'talent-map/page.tsx:applyLocSuggestion',message:'apply location suggestion',data:{label:s.label,lng:s.lng,lat:s.lat,radiusKm},timestamp:Date.now()})
+    // #endregion
     setLocQuery('')
     setLocOpen(false)
     setLocError(null)
@@ -475,6 +504,9 @@ export default function TalentMapPage() {
     }
     setLocBusy(true)
     setLocError(null)
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'talent-map/page.tsx:geocodeAndFly',message:'geocode start',data:{query:q,radiusKm},timestamp:Date.now()})
+    // #endregion
     try {
       const u = new URL(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json`)
       u.searchParams.set('access_token', token)
@@ -495,11 +527,39 @@ export default function TalentMapPage() {
       setSearchCenter({ lng, lat, label: q })
       setFlyTo({ lng, lat, zoom: z })
       setLocQuery('')
+      // #region agent log
+      emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'talent-map/page.tsx:geocodeAndFly',message:'geocode success',data:{lng,lat,zoom:z},timestamp:Date.now()})
+      // #endregion
     } catch (e: any) {
       setLocError(e?.message || 'Could not search location.')
     } finally {
       setLocBusy(false)
     }
+  }
+
+  function useCurrentLocation() {
+    if (!navigator?.geolocation) {
+      setLocError('Geolocation is not available in this browser.')
+      return
+    }
+    setLocBusy(true)
+    setLocError(null)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lng = pos.coords.longitude
+        const lat = pos.coords.latitude
+        setSearchCenter({ lng, lat, label: 'Current location' })
+        setFlyTo({ lng, lat, zoom: zoomForRadiusKm(radiusKm) })
+        setLocQuery('Current location')
+        setLocBusy(false)
+        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H11',location:'talent-map/page.tsx:current-location',message:'set current location',data:{lng,lat},timestamp:Date.now()})
+      },
+      () => {
+        setLocError('Unable to access your location.')
+        setLocBusy(false)
+      },
+      { enableHighAccuracy: false, timeout: 8000 }
+    )
   }
 
   useEffect(() => {
@@ -550,6 +610,22 @@ export default function TalentMapPage() {
       setFiltersCollapsed(true)
     }
   }, [selectedBusiness])
+
+  // Trigger map resize when panels collapse/expand
+  useEffect(() => {
+    // #region agent log
+    emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H1',location:'talent-map/page.tsx:map-resize-trigger',message:'panel state changed',data:{panelsCollapsed,filtersCollapsed,triggerBefore:mapResizeTrigger},timestamp:Date.now()})
+    // #endregion
+    setMapResizeTrigger((n) => n + 1)
+  }, [panelsCollapsed, filtersCollapsed])
+
+  useEffect(() => {
+    if (showAllBusinesses && !searchCenter && !committedRouteQuery) {
+      setMapFitBounds(AU_BOUNDS)
+    } else {
+      setMapFitBounds(null)
+    }
+  }, [showAllBusinesses, searchCenter, committedRouteQuery])
 
   const headerRight = useMemo(() => {
     return (
@@ -634,8 +710,32 @@ export default function TalentMapPage() {
               <div className="text-xs text-slate-400 mb-5">Filters update the map in real time. No page reloads.</div>
 
               <div className="space-y-5">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <label className="flex items-start gap-3 text-sm text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 accent-blue-500"
+                      checked={showAllBusinesses}
+                      onChange={(e) => {
+                        const nextChecked = e.target.checked
+                        // #region agent log
+                        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'talent-map/page.tsx:showAllBusinesses',message:'toggle show all businesses',data:{nextChecked},timestamp:Date.now()})
+                        // #endregion
+                        setShowAllBusinesses(nextChecked)
+                      }}
+                    />
+                    <span className="leading-snug">
+                      <span className="font-semibold text-white">Show all businesses in Creerlio</span>
+                      <span className="block text-xs text-slate-400 mt-1.5">
+                        Ignores filters (still respects business discoverability). Useful for exploration and verification.
+                      </span>
+                    </span>
+                  </label>
+                </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-200 mb-2.5">Jump to location</label>
+                  <label className="block text-sm font-medium text-slate-200 mb-2.5">
+                    Within {radiusKm} km of…
+                  </label>
                   <div className="flex items-center gap-2.5">
                     <div className="relative flex-1">
                       <input
@@ -711,20 +811,67 @@ export default function TalentMapPage() {
                     >
                       {locBusy ? 'Searching…' : 'Go'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={useCurrentLocation}
+                      disabled={locBusy}
+                      className="px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 text-sm shrink-0"
+                    >
+                      Use my location
+                    </button>
                   </div>
                   <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-medium">Radius (directional): {radiusKm} km</span>
+                    <span className="font-medium">Radius: {radiusKm} km</span>
                     <input
                       type="range"
                       min={5}
-                      max={100}
+                      max={4000}
                       step={5}
                       value={radiusKm}
-                      onChange={(e) => setRadiusKm(Number(e.target.value))}
+                      onChange={(e) => {
+                        const nextRadius = Number(e.target.value)
+                        // #region agent log
+                        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H4',location:'talent-map/page.tsx:radius',message:'radius change',data:{nextRadius},timestamp:Date.now()})
+                        // #endregion
+                        setRadiusKm(nextRadius)
+                      }}
                       className="w-32 accent-blue-500"
                     />
                   </div>
                   {locError ? <div className="mt-2 text-xs text-red-400 font-medium">{locError}</div> : null}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-200 mb-2.5">Intent filters</label>
+                  <div className="flex flex-col gap-3">
+                    <select
+                      value={intentStatusFilter}
+                      onChange={(e) => {
+                        const next = e.target.value
+                        setIntentStatusFilter(next)
+                        emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H10',location:'talent-map/page.tsx:intent-filter',message:'intent status filter',data:{next},timestamp:Date.now()})
+                      }}
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-sm"
+                    >
+                      <option value="">All intent statuses</option>
+                      <option value="actively_building_talent">Actively building talent</option>
+                      <option value="future_planning">Future planning</option>
+                      <option value="not_hiring">Not hiring</option>
+                    </select>
+                    <label className="flex items-center gap-2 text-xs text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="accent-blue-500"
+                        checked={intentCompatibility}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                          setIntentCompatibility(next)
+                          emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H10',location:'talent-map/page.tsx:intent-compat',message:'intent compatibility toggle',data:{next},timestamp:Date.now()})
+                        }}
+                      />
+                      Show only compatible intent signals
+                    </label>
+                  </div>
                 </div>
 
                 <div>
@@ -1012,28 +1159,14 @@ export default function TalentMapPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                  <label className="flex items-start gap-3 text-sm text-slate-200 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-blue-500"
-                      checked={showAllBusinesses}
-                      onChange={(e) => setShowAllBusinesses(e.target.checked)}
-                    />
-                    <span className="leading-snug">
-                      <span className="font-semibold text-white">Show all businesses in Creerlio</span>
-                      <span className="block text-xs text-slate-400 mt-1.5">
-                        Ignores filters (still respects business discoverability). Useful for exploration and verification.
-                      </span>
-                    </span>
-                  </label>
-                </div>
-
                 <div className="pt-3 flex items-center justify-between gap-3 border-t border-white/10">
                   <button
                     type="button"
                     className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10 text-xs font-medium transition-colors"
                     onClick={() => {
+                      // #region agent log
+                      emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H3',location:'talent-map/page.tsx:clear-filters',message:'clear filters',data:{showAllBusinesses},timestamp:Date.now()})
+                      // #endregion
                       setFilters({ q: '', industries: [], work: '' })
                       setIndustryInput('')
                       setShowAllBusinesses(false)
@@ -1067,200 +1200,276 @@ export default function TalentMapPage() {
             </div>
           </aside>
 
-          {/* RIGHT SIDE: Full-height map with conditional panels */}
-          <div className="flex-1 flex flex-col gap-4">
-            {/* Panels - Only visible when business is selected */}
-            {selectedBusiness && (
-            <div className="flex gap-4 h-[140px] flex-shrink-0">
-              {/* LEFT: Results Panel - 1/4 width */}
-              <div className="w-1/4 rounded-xl p-3 border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-white font-semibold text-sm">Results</div>
-                  <div className="text-xs text-slate-400">
-                    {results.length}
+          {/* RIGHT SIDE: Horizontal layout with Results, Route Intelligence, and Map */}
+          <div className="flex-1 flex gap-4">
+            {/* Collapsible Panels Container */}
+            {panelsCollapsed ? (
+              /* Collapsed state - show expand button */
+              <div className="flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setPanelsCollapsed(false)}
+                  className="h-full px-2 py-4 rounded-xl border border-white/10 bg-slate-900/50 backdrop-blur-sm hover:bg-white/5 transition-colors flex flex-col items-center justify-center gap-2"
+                  title="Expand panels"
+                >
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  <div className="text-white font-semibold text-xs whitespace-nowrap" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                    {results.length} Results • {routeState?.drivingMins ? `${routeState.drivingMins}m drive` : 'Route'}
                   </div>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* LEFT COLUMN: Results Panel */}
+                <div className="w-48 flex-shrink-0 rounded-xl p-3 border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-y-auto relative">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-white font-semibold text-sm">Results</div>
+                    <div className="text-xs text-slate-400">
+                      {results.length}
+                    </div>
+                  </div>
+
+                  {results.length === 0 ? (
+                    <div className="text-center py-4 text-slate-400 text-xs">
+                      No businesses found
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {results.map((business: any) => (
+                        <button
+                          key={business.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedBusinessId(business.id)
+                            setSelectBusinessId(business.id)
+                          }}
+                          className={`w-full text-left p-2 rounded border transition-all ${
+                            selectedBusinessId === business.id
+                              ? 'bg-blue-500/20 border-blue-500/50'
+                              : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            {business.intent_visibility && business.intent_status ? (
+                              <span
+                                className={`inline-flex h-2 w-2 rounded-full ${
+                                  business.intent_status === 'actively_building_talent' ? 'bg-emerald-400' :
+                                  business.intent_status === 'future_planning' ? 'bg-blue-400' :
+                                  'bg-slate-400'
+                                }`}
+                                title={`Intent: ${business.intent_status.replace(/_/g, ' ')}`}
+                              />
+                            ) : null}
+                            <div className="font-medium text-white text-xs truncate">{business.name}</div>
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+                            {Array.isArray(business.industries) && business.industries.length
+                              ? business.industries[0]
+                              : 'Industry not set'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {results.length === 0 ? (
-                  <div className="text-center py-4 text-slate-400 text-xs">
-                    No businesses found
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    {results.map((business: any) => (
-                      <button
-                        key={business.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedBusinessId(business.id)
-                          setSelectBusinessId(business.id)
-                        }}
-                        className={`w-full text-left p-2 rounded border transition-all ${
-                          selectedBusinessId === business.id
-                            ? 'bg-blue-500/20 border-blue-500/50'
-                            : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                        }`}
-                      >
-                        <div className="font-medium text-white text-xs truncate">{business.name}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                          {Array.isArray(business.industries) && business.industries.length
-                            ? business.industries[0]
-                            : 'Industry not set'}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                {/* MIDDLE COLUMN: Route Intelligence Panel */}
+                <div className="w-72 flex-shrink-0 rounded-xl p-4 border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-y-auto relative">
+                  {/* Collapse button */}
+                  <button
+                    type="button"
+                    onClick={() => setPanelsCollapsed(true)}
+                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-colors z-10"
+                    title="Collapse panels"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
 
-              {/* RIGHT: Route Intelligence Panel - 3/4 width */}
-              <div className="flex-1 rounded-xl p-3 border border-white/10 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
-                <div className="font-semibold text-white mb-2 text-sm">Route Intelligence</div>
+                  <div className="font-semibold text-white mb-3 text-sm">Route Intelligence</div>
 
-                {!selectedBusiness ? (
-                  <div className="text-center py-8 text-slate-400 text-sm">
-                    Select a business from the Results panel to calculate routes and commute times.
-                  </div>
-                ) : (
-                  <>
-                    <div className="text-xs text-slate-400 mb-2">
-                      Point A: {selectedBusiness.properties.name} • Point B: your chosen living location
+                  {!selectedBusiness ? (
+                    <div className="text-center py-6 text-slate-400 text-sm">
+                      Select a business from the Results panel to calculate routes and commute times.
                     </div>
-                    <div className="flex gap-2 mb-2">
-                      <div className="relative flex-1">
-                        <input
-                          value={routeQuery}
-                          onChange={(e) => {
-                            setRouteQuery(e.target.value)
-                            setRouteSuggestionsOpen(true)
-                          }}
-                          onFocus={() => setRouteSuggestionsOpen(true)}
-                          onBlur={() => setTimeout(() => setRouteSuggestionsOpen(false), 120)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setRouteSuggestionsOpen(false)
-                              return
-                            }
-                            if (!routeSuggestionsOpen || !routeSuggestions.length) {
-                              if (e.key === 'Enter' && routeQuery.trim()) {
-                                setCommittedRouteQuery(routeQuery.trim())
-                              }
-                              return
-                            }
-                            if (e.key === 'ArrowDown') {
-                              e.preventDefault()
-                              setRouteActiveIdx((i) => Math.min(routeSuggestions.length - 1, i + 1))
-                              return
-                            }
-                            if (e.key === 'ArrowUp') {
-                              e.preventDefault()
-                              setRouteActiveIdx((i) => Math.max(0, i - 1))
-                              return
-                            }
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              const pick = routeSuggestions[routeActiveIdx]
-                              if (pick) {
-                                setRouteQuery(pick.label)
+                  ) : (
+                    <>
+                      <div className="text-xs text-slate-400 mb-3">
+                        Point A: {selectedBusiness.properties.name} • Point B: your chosen living location
+                      </div>
+                      <div className="flex gap-2 mb-3">
+                        <div className="relative flex-1">
+                          <input
+                            value={routeQuery}
+                            onChange={(e) => {
+                              setRouteQuery(e.target.value)
+                              setRouteSuggestionsOpen(true)
+                            }}
+                            onFocus={() => setRouteSuggestionsOpen(true)}
+                            onBlur={() => setTimeout(() => setRouteSuggestionsOpen(false), 120)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
                                 setRouteSuggestionsOpen(false)
-                                setCommittedRouteQuery(pick.label)
+                                return
                               }
-                              return
+                              if (!routeSuggestionsOpen || !routeSuggestions.length) {
+                                if (e.key === 'Enter' && routeQuery.trim()) {
+                                  setCommittedRouteQuery(routeQuery.trim())
+                                  setPanelsCollapsed(true)
+                                }
+                                return
+                              }
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault()
+                                setRouteActiveIdx((i) => Math.min(routeSuggestions.length - 1, i + 1))
+                                return
+                              }
+                              if (e.key === 'ArrowUp') {
+                                e.preventDefault()
+                                setRouteActiveIdx((i) => Math.max(0, i - 1))
+                                return
+                              }
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                const pick = routeSuggestions[routeActiveIdx]
+                                if (pick) {
+                                  setRouteQuery(pick.label)
+                                  setRouteSuggestionsOpen(false)
+                                  setCommittedRouteQuery(pick.label)
+                                  setPanelsCollapsed(true)
+                                }
+                                return
+                              }
+                            }}
+                            placeholder="Set living location…"
+                            className="w-full px-3 py-2 pr-8 bg-white text-black rounded-lg text-sm border border-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            role="combobox"
+                            aria-autocomplete="list"
+                            aria-expanded={routeSuggestionsOpen}
+                            aria-controls="route-suggestions"
+                          />
+                          {/* Clear button */}
+                          {routeQuery && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRouteQuery('')
+                                setCommittedRouteQuery('')
+                                setRouteSuggestions([])
+                              }}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                              title="Clear"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                          {routeSuggestionsOpen && routeSuggestions.length > 0 && (
+                            <div
+                              id="route-suggestions"
+                              role="listbox"
+                              className="absolute left-0 right-0 mt-1.5 rounded-lg border border-white/10 bg-slate-950/98 backdrop-blur shadow-2xl overflow-hidden z-20"
+                            >
+                              {routeSuggestions.map((s, idx) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                                    idx === routeActiveIdx ? 'bg-blue-500/20 text-white' : 'bg-transparent text-slate-200 hover:bg-white/5'
+                                  }`}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setRouteQuery(s.label)
+                                    setRouteSuggestionsOpen(false)
+                                    setCommittedRouteQuery(s.label)
+                                    setPanelsCollapsed(true)
+                                  }}
+                                  role="option"
+                                  aria-selected={idx === routeActiveIdx}
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (routeQuery.trim()) {
+                              setCommittedRouteQuery(routeQuery.trim())
+                              setPanelsCollapsed(true)
                             }
                           }}
-                          placeholder="Set living location…"
-                          className="w-full px-3 py-2 bg-white text-black rounded-lg text-sm border border-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          role="combobox"
-                          aria-autocomplete="list"
-                          aria-expanded={routeSuggestionsOpen}
-                          aria-controls="route-suggestions"
-                        />
-                        {routeSuggestionsOpen && routeSuggestions.length > 0 && (
-                          <div
-                            id="route-suggestions"
-                            role="listbox"
-                            className="absolute left-0 right-0 mt-1.5 rounded-lg border border-white/10 bg-slate-950/98 backdrop-blur shadow-2xl overflow-hidden z-20"
-                          >
-                            {routeSuggestions.map((s, idx) => (
-                              <button
-                                key={s.id}
-                                type="button"
-                                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                                  idx === routeActiveIdx ? 'bg-blue-500/20 text-white' : 'bg-transparent text-slate-200 hover:bg-white/5'
-                                }`}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => {
-                                  setRouteQuery(s.label)
-                                  setRouteSuggestionsOpen(false)
-                                  setCommittedRouteQuery(s.label)
-                                }}
-                                role="option"
-                                aria-selected={idx === routeActiveIdx}
-                              >
-                                {s.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                          disabled={!routeQuery.trim()}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        >
+                          {routeState?.busy ? '…' : 'Set'}
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (routeQuery.trim()) {
-                            setCommittedRouteQuery(routeQuery.trim())
-                          }
-                        }}
-                        disabled={!routeQuery.trim()}
-                        className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        {routeState?.busy ? 'Calculating…' : 'Set'}
-                      </button>
-                    </div>
-                    {routeState?.to && (
-                      <div className="text-xs text-slate-300 mb-1.5">
-                        Living location: {routeState.to.label}
+                      {routeState?.to && (
+                        <div className="text-xs text-slate-300 mb-3">
+                          Living location: {routeState.to.label}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="p-2 rounded border border-white/10 bg-slate-950/40 text-center">
+                          <div className="text-xs text-slate-400 mb-1">Car</div>
+                          {routeState?.drivingKm ? (
+                            <>
+                              <div className="text-white font-medium text-sm">{routeState.drivingKm} km</div>
+                              <div className="text-slate-400 text-xs">{routeState.drivingMins} min</div>
+                            </>
+                          ) : (
+                            <div className="text-white font-medium text-sm">—</div>
+                          )}
+                        </div>
+                        <div className="p-2 rounded border border-white/10 bg-slate-950/40 text-center">
+                          <div className="text-xs text-slate-400 mb-1">Public</div>
+                          <div className="text-white font-medium text-sm">N/A</div>
+                        </div>
+                        <div className="p-2 rounded border border-white/10 bg-slate-950/40 text-center">
+                          <div className="text-xs text-slate-400 mb-1">Bike</div>
+                          {routeState?.cyclingKm ? (
+                            <>
+                              <div className="text-white font-medium text-sm">{routeState.cyclingKm} km</div>
+                              <div className="text-slate-400 text-xs">{routeState.cyclingMins} min</div>
+                            </>
+                          ) : (
+                            <div className="text-white font-medium text-sm">—</div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    <div className="grid grid-cols-3 gap-2 mb-2">
-                      <div className="p-2 rounded border border-white/10 bg-slate-950/40">
-                        <div className="text-xs text-slate-400">Car</div>
-                        <div className="text-white font-medium text-sm">{routeState?.drivingMins ? `${routeState.drivingMins} min` : '—'}</div>
-                      </div>
-                      <div className="p-2 rounded border border-white/10 bg-slate-950/40">
-                        <div className="text-xs text-slate-400">Public</div>
-                        <div className="text-white font-medium text-sm">N/A</div>
-                      </div>
-                      <div className="p-2 rounded border border-white/10 bg-slate-950/40">
-                        <div className="text-xs text-slate-400">Bike</div>
-                        <div className="text-white font-medium text-sm">{routeState?.cyclingMins ? `${routeState.cyclingMins} min` : '—'}</div>
-                      </div>
-                    </div>
 
-                    {/* Business Quick Actions */}
-                    {selectedBusiness.properties.slug && (
-                      <div className="flex gap-2 pt-2 border-t border-white/10">
-                        <Link
-                          href={`/dashboard/business/view?id=${selectedBusiness.properties.id}`}
-                          className="flex-1 px-3 py-1.5 bg-white text-slate-900 rounded text-center font-semibold hover:bg-slate-100 text-xs"
-                        >
-                          View Business
-                        </Link>
-                        <Link
-                          href={`/dashboard/talent/connect/${selectedBusiness.properties.slug}`}
-                          className="flex-1 px-3 py-1.5 bg-blue-500 text-white rounded text-center font-semibold hover:bg-blue-600 text-xs"
-                        >
-                          Connect
-                        </Link>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
+                      {/* Business Quick Actions */}
+                      {selectedBusiness.properties.slug && (
+                        <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
+                          <Link
+                            href={`/dashboard/business/view?id=${selectedBusiness.properties.id}&from=talent-map`}
+                            className="w-full px-3 py-2 bg-white text-slate-900 rounded text-center font-semibold hover:bg-slate-100 text-xs"
+                          >
+                            View Profile
+                          </Link>
+                          <Link
+                            href={`/dashboard/talent/connect/${selectedBusiness.properties.slug}`}
+                            className="w-full px-3 py-2 bg-blue-500 text-white rounded text-center font-semibold hover:bg-blue-600 text-xs"
+                          >
+                            Connect
+                          </Link>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
             )}
 
-            {/* Map container - Full height when no business selected, half height when business selected */}
-            <div className="flex-1 min-h-0">
+            {/* RIGHT COLUMN: Map container - Takes remaining space */}
+            <div className="flex-1 min-w-0">
               <div className="rounded-xl border border-white/10 bg-slate-900/50 backdrop-blur-sm h-full relative overflow-hidden">
                 {loading ? (
                   <div className="h-full flex items-center justify-center">
@@ -1286,6 +1495,10 @@ export default function TalentMapPage() {
                     onRouteStateChange={setRouteState}
                     onRouteQueryChange={setRouteQuery}
                     externalRouteQuery={committedRouteQuery}
+                    triggerResize={mapResizeTrigger}
+                    intentStatus={intentStatusFilter}
+                    intentCompatibility={intentCompatibility}
+                    fitBounds={mapFitBounds}
                   />
                 )}
 

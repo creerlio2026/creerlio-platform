@@ -125,6 +125,11 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
 
   const connectHref = useMemo(() => `/dashboard/talent/connect/${data.slug}`, [data.slug])
   const signInHref = useMemo(() => `/login?redirect=/business/${data.slug}`, [data.slug])
+  const connectAnonHref = useMemo(
+    () => `/login/talent?mode=signup&redirect=/dashboard/talent/connect/${data.slug}`,
+    [data.slug]
+  )
+  const isAnon = connectState === 'anon'
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -151,42 +156,61 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
               <span className="text-xl font-bold">Creerlio</span>
             </Link>
             <div className="flex items-center gap-3">
-              <Link
-                href={`/jobs`}
-                className="px-4 py-2 rounded-lg border border-white/10 text-slate-200 hover:bg-white/5 transition-colors"
-              >
-                Explore Roles
-              </Link>
-              {connectState === 'talent' ? (
-                <Link
-                  href={connectHref}
-                  className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
-                >
-                  Connection Request
-                </Link>
-              ) : connectState === 'anon' ? (
-                <Link
-                  href={signInHref}
-                  className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
-                >
-                  Sign in to connect
-                </Link>
-              ) : connectState === 'business' ? (
-                <span className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 cursor-not-allowed">
-                  Connect (Talent only)
-                </span>
-              ) : null}
-              <a
-                href="#talent-community"
-                className={`px-4 py-2 rounded-lg ${
-                  data.talent_community_enabled
-                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-300 cursor-not-allowed'
-                } transition-colors`}
-                aria-disabled={!data.talent_community_enabled}
-              >
-                Join Talent Community
-              </a>
+              {isAnon ? (
+                <>
+                  <Link
+                    href={connectAnonHref}
+                    className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
+                  >
+                    Connect with this Business
+                  </Link>
+                  <Link
+                    href="/"
+                    className="px-4 py-2 rounded-lg border border-white/15 text-white hover:bg-white/5 transition-colors"
+                  >
+                    Back to Home
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href={`/jobs`}
+                    className="px-4 py-2 rounded-lg border border-white/10 text-slate-200 hover:bg-white/5 transition-colors"
+                  >
+                    Explore Roles
+                  </Link>
+                  {connectState === 'talent' ? (
+                    <Link
+                      href={connectHref}
+                      className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
+                    >
+                      Connection Request
+                    </Link>
+                  ) : connectState === 'anon' ? (
+                    <Link
+                      href={signInHref}
+                      className="px-4 py-2 rounded-lg bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
+                    >
+                      Sign in to connect
+                    </Link>
+                  ) : connectState === 'business' ? (
+                    <span className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 cursor-not-allowed">
+                      Connect (Talent only)
+                    </span>
+                  ) : null}
+                  <a
+                    href="#talent-community"
+                    className={`px-4 py-2 rounded-lg ${
+                      data.talent_community_enabled
+                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-300 cursor-not-allowed'
+                    } transition-colors`}
+                    aria-disabled={!data.talent_community_enabled}
+                  >
+                    Join Talent Community
+                  </a>
+                </>
+              )}
             </div>
           </div>
         </header>
@@ -203,26 +227,28 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
               {heroSubtitle}
             </motion.p>
 
-            <motion.div variants={fadeUp} className="mt-8 flex flex-wrap gap-3">
-              <Link
-                href="/jobs"
-                className="px-5 py-3 rounded-xl bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
-              >
-                Explore Roles
-              </Link>
-              <a
-                href="#areas"
-                className="px-5 py-3 rounded-xl border border-white/15 text-white hover:bg-white/5 transition-colors"
-              >
-                Business Areas
-              </a>
-              <a
-                href="#support"
-                className="px-5 py-3 rounded-xl border border-white/15 text-white hover:bg-white/5 transition-colors"
-              >
-                Support Hub
-              </a>
-            </motion.div>
+            {!isAnon ? (
+              <motion.div variants={fadeUp} className="mt-8 flex flex-wrap gap-3">
+                <Link
+                  href="/jobs"
+                  className="px-5 py-3 rounded-xl bg-white text-slate-900 font-semibold hover:bg-slate-100 transition-colors"
+                >
+                  Explore Roles
+                </Link>
+                <a
+                  href="#areas"
+                  className="px-5 py-3 rounded-xl border border-white/15 text-white hover:bg-white/5 transition-colors"
+                >
+                  Business Areas
+                </a>
+                <a
+                  href="#support"
+                  className="px-5 py-3 rounded-xl border border-white/15 text-white hover:bg-white/5 transition-colors"
+                >
+                  Support Hub
+                </a>
+              </motion.div>
+            ) : null}
           </motion.div>
         </div>
       </section>
@@ -237,9 +263,11 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
             <motion.p variants={fadeUp} className="mt-4 text-slate-300 leading-relaxed">
               {valueBody}
             </motion.p>
-            <motion.p variants={fadeUp} className="mt-4 text-slate-400 text-sm">
-              Businesses can edit this copy in their Dashboard.
-            </motion.p>
+            {!isAnon ? (
+              <motion.p variants={fadeUp} className="mt-4 text-slate-400 text-sm">
+                Businesses can edit this copy in their Dashboard.
+              </motion.p>
+            ) : null}
           </motion.div>
 
           <motion.div
@@ -324,7 +352,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
                 </motion.div>
               ))}
             </div>
-            {programs.length === 0 ? (
+            {programs.length === 0 && !isAnon ? (
               <motion.div variants={fadeUp} className="text-slate-400 mt-6">
                 Add programs (e.g., Early Careers, Indigenous Careers, Career Comeback) in your Dashboard.
               </motion.div>
@@ -366,6 +394,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
       </section>
 
       {/* SUPPORT HUB */}
+      {!isAnon ? (
       <section id="support" className="py-16 border-t border-white/10">
         <div className="max-w-7xl mx-auto px-8">
           <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-blue-500/15 via-emerald-500/10 to-purple-500/10 p-10">
@@ -389,6 +418,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
           </div>
         </div>
       </section>
+      ) : null}
 
       {/* BENEFITS */}
       <section className="py-16 border-t border-white/10">
@@ -407,7 +437,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
                 </button>
               </div>
             ))}
-            {benefits.length === 0 ? (
+            {benefits.length === 0 && !isAnon ? (
               <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-6 text-slate-400">
                 Add benefits in your Dashboard (e.g., flexibility, wellness, parental leave).
               </div>
@@ -421,7 +451,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
         <div className="max-w-7xl mx-auto px-8">
           <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">Media</h2>
 
-          {mediaImages.length + mediaVideos.length + mediaDocs.length === 0 ? (
+          {mediaImages.length + mediaVideos.length + mediaDocs.length === 0 && !isAnon ? (
             <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-6 text-slate-400">
               Add images, videos, or documents in your Business Dashboard.
             </div>
@@ -515,7 +545,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
               )
             })}
           </div>
-          {areas.length === 0 ? (
+          {areas.length === 0 && !isAnon ? (
             <div className="text-slate-400 mt-6">
               Add business areas in your Dashboard (e.g., Engineering, Data, Risk, Cyber).
             </div>
@@ -524,6 +554,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
       </section>
 
       {/* TALENT COMMUNITY CTA */}
+      {!isAnon ? (
       <section id="talent-community" className="py-16 border-t border-white/10">
         <div className="max-w-7xl mx-auto px-8">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-8">
@@ -565,6 +596,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
           {/* TODO: DIVERSITY_PIPELINE_INSIGHTS */}
         </div>
       </section>
+      ) : null}
 
       {/* SOCIAL PROOF */}
       <section className="py-16 border-t border-white/10">
@@ -583,7 +615,7 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
               </div>
             ))}
           </div>
-          {social.length === 0 ? (
+          {social.length === 0 && !isAnon ? (
             <div className="text-slate-400 mt-6">
               Add testimonials, awards, or quotes in your Dashboard to build trust.
             </div>
@@ -612,6 +644,9 @@ export function BusinessProfilePage({ data }: { data: BusinessProfilePageData })
               </Link>
               <Link href="/about" className="text-slate-300 hover:text-white transition-colors">
                 Employer values
+              </Link>
+              <Link href="/terms" className="text-slate-300 hover:text-white transition-colors">
+                Terms and Conditions
               </Link>
             </div>
           </div>

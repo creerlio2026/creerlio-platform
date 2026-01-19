@@ -7,31 +7,24 @@ export function Footer() {
     <footer className="bg-gray-900 text-gray-300 border-t border-gray-800">
       <div className="max-w-7xl mx-auto px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
-          {/* Brand */}
           <div className="col-span-1 md:col-span-2">
             <h3 className="text-white text-xl font-bold mb-4">PeopleSelect</h3>
             <p className="text-gray-400 mb-6 max-w-md">
-              Recruitment built on relationships — not job ads. Permanent and contract recruitment powered by real-time talent intelligence.
+              A recruitment agency powered by Creerlio. Discovery first. Recruitment second. Human-led always. No resumes. No ATS systems. No algorithms.
             </p>
           </div>
 
-          {/* Navigation */}
           <div>
             <h4 className="text-white font-semibold mb-4">Navigation</h4>
             <ul className="space-y-3">
-              <li>
-                <Link href="/peopleselect/services" className="hover:text-white transition-colors text-sm">
-                  Services
-                </Link>
-              </li>
               <li>
                 <Link href="/peopleselect/how-it-works" className="hover:text-white transition-colors text-sm">
                   How It Works
                 </Link>
               </li>
               <li>
-                <Link href="/peopleselect/talent-network" className="hover:text-white transition-colors text-sm">
-                  Talent Network
+                <Link href="/peopleselect/why-people-select" className="hover:text-white transition-colors text-sm">
+                  Why PeopleSelect
                 </Link>
               </li>
               <li>
@@ -39,26 +32,30 @@ export function Footer() {
                   About
                 </Link>
               </li>
+              <li>
+                <Link href="/peopleselect/faq" className="hover:text-white transition-colors text-sm">
+                  FAQ
+                </Link>
+              </li>
             </ul>
           </div>
 
-          {/* Contact */}
           <div>
             <h4 className="text-white font-semibold mb-4">Contact</h4>
             <ul className="space-y-3">
               <li>
                 <Link href="/peopleselect/contact" className="hover:text-white transition-colors text-sm">
-                  Book a Call
+                  Get in Touch
                 </Link>
               </li>
               <li>
                 <Link href="/peopleselect/for-employers" className="hover:text-white transition-colors text-sm">
-                  For Employers
+                  For Businesses
                 </Link>
               </li>
               <li>
                 <Link href="/peopleselect/for-candidates" className="hover:text-white transition-colors text-sm">
-                  For Candidates
+                  For Talent
                 </Link>
               </li>
             </ul>
@@ -70,7 +67,7 @@ export function Footer() {
             © {new Date().getFullYear()} PeopleSelect. All rights reserved.
           </p>
           <p className="text-gray-500 text-sm">
-            Built on Creerlio
+            Powered by Creerlio
           </p>
         </div>
       </div>

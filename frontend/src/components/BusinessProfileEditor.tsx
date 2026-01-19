@@ -8,6 +8,26 @@ import BusinessProfileShareConfig, { ShareConfig } from '@/components/BusinessPr
 import { buildSharedPayload, createPortfolioSnapshot } from '@/lib/portfolioSnapshots'
 import { TemplateId } from '@/components/portfolioTemplates'
 
+const DEBUG_ENDPOINT = 'http://127.0.0.1:7243/ingest/6182f207-3db2-4ea3-b5df-968f1e2a56cc'
+const emitDebugLog = (payload: Record<string, unknown>) => {
+  fetch(DEBUG_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+  fetch('/api/debug-log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(() => {})
+}
+
+type BusinessIntentStatus = 'actively_building_talent' | 'future_planning' | 'not_hiring'
+type BusinessTimeHorizon = 'now' | 'near' | 'future' | ''
+type BusinessEngagementType = 'hire' | 'contract' | 'advisory' | ''
+type BusinessLocationReality = 'on_site' | 'hybrid' | 'remote' | ''
+
+const defaultBusinessIntent = {
+  intent_status: 'not_hiring' as BusinessIntentStatus,
+  visibility: false,
+  capability_needs: '',
+  time_horizon: '' as BusinessTimeHorizon,
+  location_reality: '' as BusinessLocationReality,
+  engagement_type: '' as BusinessEngagementType,
+}
+
 let pdfJsLibPromise: Promise<any> | null = null
 function loadPdfJsLib() {
   if (pdfJsLibPromise) return pdfJsLibPromise
@@ -199,6 +219,25 @@ export default function BusinessProfileEditor() {
     projects: true,
   })
   const [savingSection, setSavingSection] = useState<string | null>(null)
+  // Section visibility for public view (default all sections visible)
+  const [sectionVisibility, setSectionVisibility] = useState<Record<string, boolean>>({
+    basic: true,
+    social: true,
+    skills: true,
+    experience: true,
+    education: true,
+    referees: true,
+    attachments: true,
+    projects: true,
+  })
+  // Individual item visibility (for social links, experience entries, education entries, etc.)
+  const [itemVisibility, setItemVisibility] = useState<Record<string, Record<number, boolean>>>({
+    social: {},
+    experience: {},
+    education: {},
+    referees: {},
+    projects: {},
+  })
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
@@ -224,6 +263,7 @@ export default function BusinessProfileEditor() {
   >(null)
 
   const [layoutDragIndex, setLayoutDragIndex] = useState<number | null>(null)
+  const [layoutExpanded, setLayoutExpanded] = useState(false)
   const [introModalOpen, setIntroModalOpen] = useState(false)
   
   // Track expanded state for textareas (key format: "section-index" or "section")
@@ -243,6 +283,15 @@ export default function BusinessProfileEditor() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<TemplateId | null>(null)
   const [businessProfileId, setBusinessProfileId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+
+  // Intent Mode (Business)
+  const [intentMode, setIntentMode] = useState(defaultBusinessIntent)
+  const [intentLoaded, setIntentLoaded] = useState(false)
+  const [intentSaving, setIntentSaving] = useState(false)
+  const [intentError, setIntentError] = useState<string | null>(null)
+  const [intentCollapsed, setIntentCollapsed] = useState(true)
+  const [intentRecordId, setIntentRecordId] = useState<string | null>(null)
+  const intentOriginalRef = useRef<any>(null)
 
   useEffect(() => {
     // Load existing saved profile (if present)
@@ -303,6 +352,112 @@ export default function BusinessProfileEditor() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!userId || !businessProfileId || intentLoaded) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('intent_modes')
+          .select('id,intent_status,visibility,constraints')
+          .eq('profile_type', 'business')
+          .eq('profile_id', businessProfileId)
+          .maybeSingle()
+        if (error) throw error
+        if (!cancelled && data) {
+          const constraints = (data as any).constraints || {}
+          setIntentRecordId(data.id)
+          const next = {
+            intent_status: (data.intent_status || 'not_hiring') as BusinessIntentStatus,
+            visibility: !!data.visibility,
+            capability_needs: Array.isArray(constraints.capability_needs) ? constraints.capability_needs.join(', ') : (constraints.capability_needs || ''),
+            time_horizon: constraints.time_horizon || '',
+            location_reality: constraints.location_reality || '',
+            engagement_type: constraints.engagement_type || '',
+          }
+          setIntentMode(next)
+          intentOriginalRef.current = { ...next }
+        }
+        if (!cancelled) setIntentLoaded(true)
+      } catch (err: any) {
+        if (!cancelled) {
+          setIntentError(err.message || 'Failed to load intent mode')
+          setIntentLoaded(true)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId, businessProfileId, intentLoaded])
+
+  const parseCsv = (value: string) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+
+  const saveIntentMode = async () => {
+    if (!userId || !businessProfileId) return
+    setIntentSaving(true)
+    setIntentError(null)
+    try {
+      const constraints = {
+        capability_needs: parseCsv(intentMode.capability_needs),
+        time_horizon: intentMode.time_horizon,
+        location_reality: intentMode.location_reality,
+        engagement_type: intentMode.engagement_type,
+      }
+
+      const { data, error } = await supabase
+        .from('intent_modes')
+        .upsert(
+          {
+            id: intentRecordId || undefined,
+            user_id: userId,
+            profile_type: 'business',
+            profile_id: businessProfileId,
+            intent_status: intentMode.intent_status,
+            visibility: intentMode.visibility,
+            constraints,
+          },
+          { onConflict: 'profile_type,profile_id' }
+        )
+        .select('id')
+        .maybeSingle()
+
+      if (error) throw error
+
+      const intentId = data?.id || intentRecordId
+      if (intentId) setIntentRecordId(intentId)
+
+      const events: Array<{ intent_id: string | null; user_id: string; profile_type: string; profile_id: string; event_type: string }> = []
+      const prev = intentOriginalRef.current
+      if (!prev) {
+        events.push({ intent_id: intentId || null, user_id: userId, profile_type: 'business', profile_id: businessProfileId, event_type: 'intent_created' })
+      } else {
+        events.push({ intent_id: intentId || null, user_id: userId, profile_type: 'business', profile_id: businessProfileId, event_type: 'intent_updated' })
+        if (prev.visibility !== intentMode.visibility) {
+          events.push({ intent_id: intentId || null, user_id: userId, profile_type: 'business', profile_id: businessProfileId, event_type: 'intent_visibility_changed' })
+        }
+      }
+
+      if (events.length) {
+        await supabase.from('intent_events').insert(events)
+      }
+
+      intentOriginalRef.current = { ...intentMode }
+
+      // #region agent log
+      emitDebugLog({sessionId:'debug-session',runId:'pre-fix',hypothesisId:'H9',location:'BusinessProfileEditor.tsx:intent-save',message:'intent mode saved',data:{intentId,visibility:intentMode.visibility,intent_status:intentMode.intent_status},timestamp:Date.now()})
+      // #endregion
+    } catch (err: any) {
+      setIntentError(err.message || 'Failed to save intent mode')
+    } finally {
+      setIntentSaving(false)
+    }
+  }
 
   // Ensure we have an intro video preview URL even if it was previously saved (without opening the picker modal).
   useEffect(() => {
@@ -430,6 +585,126 @@ export default function BusinessProfileEditor() {
                   {bioExpanded ? 'Show less' : 'Show more'}
                 </button>
               ) : null}
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-slate-950/40 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold">Intent Mode</h2>
+                  <p className="text-sm text-slate-300">
+                    Share what you are open to right now, with clear boundaries and visibility control.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIntentCollapsed((v) => !v)}
+                  className="text-sm text-blue-300 hover:text-blue-200"
+                >
+                  {intentCollapsed ? 'Expand' : 'Collapse'}
+                </button>
+              </div>
+
+              {!intentCollapsed && (
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      id="intent-visibility-business"
+                      type="checkbox"
+                      className="accent-blue-500"
+                      checked={intentMode.visibility}
+                      onChange={(e) => setIntentMode((p) => ({ ...p, visibility: e.target.checked }))}
+                    />
+                    <label htmlFor="intent-visibility-business" className="text-sm text-slate-200">
+                      Visibility on (share intent signal in discovery)
+                    </label>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Intent status</label>
+                      <select
+                        value={intentMode.intent_status}
+                        onChange={(e) => setIntentMode((p) => ({ ...p, intent_status: e.target.value as BusinessIntentStatus }))}
+                        className="w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="actively_building_talent">Actively building talent</option>
+                        <option value="future_planning">Future planning</option>
+                        <option value="not_hiring">Not hiring</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Engagement type</label>
+                      <select
+                        value={intentMode.engagement_type}
+                        onChange={(e) => setIntentMode((p) => ({ ...p, engagement_type: e.target.value as BusinessEngagementType }))}
+                        className="w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Select</option>
+                        <option value="hire">Hire</option>
+                        <option value="contract">Contract</option>
+                        <option value="advisory">Advisory</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Time horizon</label>
+                      <select
+                        value={intentMode.time_horizon}
+                        onChange={(e) => setIntentMode((p) => ({ ...p, time_horizon: e.target.value as BusinessTimeHorizon }))}
+                        className="w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Select</option>
+                        <option value="now">Now</option>
+                        <option value="near">Near</option>
+                        <option value="future">Future</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-1">Location reality</label>
+                      <select
+                        value={intentMode.location_reality}
+                        onChange={(e) => setIntentMode((p) => ({ ...p, location_reality: e.target.value as BusinessLocationReality }))}
+                        className="w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Select</option>
+                        <option value="on_site">On-site</option>
+                        <option value="hybrid">Hybrid</option>
+                        <option value="remote">Remote</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Capability needs (comma-separated)</label>
+                    <input
+                      value={intentMode.capability_needs}
+                      onChange={(e) => setIntentMode((p) => ({ ...p, capability_needs: e.target.value }))}
+                      className="w-full rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-sm text-white"
+                      placeholder="e.g., product design, data engineering"
+                    />
+                  </div>
+
+                  {intentError && (
+                    <div className="text-sm text-red-300">{intentError}</div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={saveIntentMode}
+                      disabled={intentSaving}
+                      className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm hover:bg-blue-600 disabled:opacity-60"
+                    >
+                      {intentSaving ? 'Saving...' : 'Save Intent Mode'}
+                    </button>
+                    <span className="text-xs text-slate-400">
+                      You can turn this off any time without affecting your profile.
+                    </span>
+                  </div>
+                </div>
+              )}
             </section>
 
             {introPreviewUrl ? (
@@ -1287,6 +1562,21 @@ export default function BusinessProfileEditor() {
           setSelectedTemplateId((saved as any).selected_template_id)
         }
         
+        // Load section visibility settings
+        if ((saved as any).sectionVisibility && typeof (saved as any).sectionVisibility === 'object') {
+          setSectionVisibility((prev) => ({
+            ...prev,
+            ...(saved as any).sectionVisibility,
+          }))
+        }
+        // Load item visibility settings
+        if ((saved as any).itemVisibility && typeof (saved as any).itemVisibility === 'object') {
+          setItemVisibility((prev) => ({
+            ...prev,
+            ...(saved as any).itemVisibility,
+          }))
+        }
+        
         setProfile((prev) => {
           // migrate older profiles by appending missing sections (e.g., referees, social)
           const savedOrder = Array.isArray((saved as any).sectionOrder) ? (saved as any).sectionOrder.map((x: any) => String(x)) : null
@@ -2107,6 +2397,51 @@ export default function BusinessProfileEditor() {
         return false
       }
 
+      // Sync basic business profile fields to business_profiles (used by discovery/search).
+      // This is a best-effort sync to avoid breaking save when schemas differ across envs.
+      const saveBusinessProfileBasics = async () => {
+        const rawName = typeof profile.name === 'string' ? profile.name.trim() : ''
+        const rawTitle = typeof profile.title === 'string' ? profile.title.trim() : ''
+        const rawBio = typeof profile.bio === 'string' ? profile.bio.trim() : ''
+        const basePayload: Record<string, any> = { user_id: uid }
+        let fields: Record<string, any> = {
+          business_name: rawName || null,
+          name: rawName || null,
+          description: rawBio || null,
+          category: rawTitle || null,
+          industry: rawTitle || null,
+        }
+
+        for (let i = 0; i < 6; i += 1) {
+          const payload = { ...basePayload, ...fields }
+          const res = await supabase
+            .from('business_profiles')
+            .upsert(payload as any, { onConflict: 'user_id' })
+            .select('id')
+            .maybeSingle()
+          if (!res.error) {
+            if (res.data?.id) setBusinessProfileId(res.data.id)
+            return true
+          }
+
+          const msg = String(res.error.message || '')
+          const missingColMatch =
+            msg.match(/Could not find the '(.+?)' column/i) ||
+            msg.match(/column \"?([a-zA-Z0-9_]+)\"? does not exist/i)
+          const missingCol = missingColMatch?.[1]
+          if (missingCol && Object.prototype.hasOwnProperty.call(fields, missingCol)) {
+            delete fields[missingCol]
+            continue
+          }
+
+          console.warn('[BusinessProfileEditor] business_profiles upsert failed:', res.error)
+          return false
+        }
+        return false
+      }
+
+      await saveBusinessProfileBasics()
+
       // Update existing profile item if present; otherwise insert a new one.
       const existing = await supabase
         .from('business_bank_items')
@@ -2125,6 +2460,8 @@ export default function BusinessProfileEditor() {
       const payloadMeta = {
         ...profile,
         profileSelections: keepSelections,
+        sectionVisibility: sectionVisibility, // Save section visibility settings
+        itemVisibility: itemVisibility, // Save individual item visibility settings
         skills: Array.isArray(profile.skills) ? profile.skills : [],
         education: Array.isArray(profile.education)
           ? profile.education.map((e) => ({
@@ -2413,82 +2750,24 @@ export default function BusinessProfileEditor() {
           </div>
         </div>
 
-        {/* Layout */}
-        <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Layout (drag to reorder)</h2>
-            <button type="button" className="text-sm underline text-blue-300" onClick={openIntroVideoModal}>
-              Pick Intro Video
-            </button>
-          </div>
-          <div className="text-xs text-slate-400 mb-3">
-            Business users will see sections in this order. Keep the most important sections at the top.
-          </div>
-          <ul className="space-y-2">
-            {(Array.isArray(profile.sectionOrder) ? profile.sectionOrder : []).map((k, idx) => (
-              <li
-                key={`${k}-${idx}`}
-                draggable
-                onDragStart={() => setLayoutDragIndex(idx)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
-                  if (layoutDragIndex == null) return
-                  moveSection(layoutDragIndex, idx)
-                  setLayoutDragIndex(null)
-                }}
-                className="border border-white/10 rounded-xl p-3 bg-slate-900/40 flex items-center justify-between gap-3 cursor-move"
-                title="Drag to reorder"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg border border-white/10 bg-slate-900 flex items-center justify-center text-xs font-semibold">
-                    ↕
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-semibold capitalize">
-                      {k === 'intro' 
-                        ? 'Business Introduction' 
-                        : k === 'skills'
-                          ? 'Products and Services'
-                          : k}
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      {k === 'intro'
-                        ? 'Optional: video introduction near the start'
-                        : k === 'skills'
-                          ? 'Provide a detailed description of what you offer, including customer testimonials or case studies'
-                        : k === 'attachments'
-                          ? 'Business Bank items in profile'
-                          : ''}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    disabled={idx === 0}
-                    className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs disabled:opacity-50"
-                    onClick={() => moveSection(idx, idx - 1)}
-                  >
-                    Up
-                  </button>
-                  <button
-                    type="button"
-                    disabled={idx === (profile.sectionOrder?.length ?? 0) - 1}
-                    className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs disabled:opacity-50"
-                    onClick={() => moveSection(idx, idx + 1)}
-                  >
-                    Down
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-
         {/* Basic Information */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Basic Information</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Basic Information</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.basic ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, basic: e.target.checked }))
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:basic' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex gap-2">
               {!sectionEdit.basic ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, basic: true }))}>
@@ -2602,7 +2881,21 @@ export default function BusinessProfileEditor() {
         {/* Social */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Social</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Social</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.social ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, social: e.target.checked }))
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:social' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.social ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, social: true }))}>
@@ -2646,6 +2939,23 @@ export default function BusinessProfileEditor() {
             <div className="space-y-3">
               {profile.socialLinks.map((s, idx) => (
                 <div key={idx} className="p-4 border border-white/10 rounded-xl bg-slate-900/40">
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show this social link in public profile">
+                      <input
+                        type="checkbox"
+                        checked={itemVisibility.social?.[idx] ?? true}
+                        onChange={(e) => {
+                          setItemVisibility(prev => ({
+                            ...prev,
+                            social: { ...prev.social, [idx]: e.target.checked }
+                          }))
+                          setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:social-item' }), 100)
+                        }}
+                        className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                      />
+                      <span>Public</span>
+                    </label>
+                  </div>
                   <div className="grid md:grid-cols-12 gap-2 items-center">
                     <div className="md:col-span-3">
                       <select
@@ -2693,7 +3003,21 @@ export default function BusinessProfileEditor() {
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-2">
             <div>
-              <h2 className="text-xl font-semibold">Products and Services</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-semibold">Products and Services</h2>
+                <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                  <input
+                    type="checkbox"
+                    checked={sectionVisibility.skills ?? true}
+                    onChange={(e) => {
+                      setSectionVisibility(prev => ({ ...prev, skills: e.target.checked }))
+                      setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:skills' }), 100)
+                    }}
+                    className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                  />
+                  <span>Public</span>
+                </label>
+              </div>
               <p className="text-slate-400 text-sm mt-1">
                 Provide a detailed description of what you offer, including customer testimonials or case studies.
               </p>
@@ -2791,7 +3115,21 @@ export default function BusinessProfileEditor() {
         {/* Experience */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Work Experience</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Work Experience</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.experience ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, experience: e.target.checked }))
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:experience' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.experience ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, experience: true }))}>
@@ -2848,18 +3186,35 @@ export default function BusinessProfileEditor() {
           {profile.experience.map((exp, index) => (
             <div key={index} className="mb-4 p-4 border border-white/10 rounded-xl bg-slate-900/40">
               <div className="flex items-center justify-between gap-3 mb-2">
-                {sectionEdit.experience ? (
-                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                <div className="flex items-center gap-3">
+                  {sectionEdit.experience ? (
+                    <label className="flex items-center gap-2 text-xs text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={!!bulkSel.experience[String(index)]}
+                        onChange={(e) => bulkToggleKey('experience', String(index), e.target.checked)}
+                      />
+                      Select
+                    </label>
+                  ) : (
+                    <div />
+                  )}
+                  <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show this experience in public profile">
                     <input
                       type="checkbox"
-                      checked={!!bulkSel.experience[String(index)]}
-                      onChange={(e) => bulkToggleKey('experience', String(index), e.target.checked)}
+                      checked={itemVisibility.experience?.[index] ?? true}
+                      onChange={(e) => {
+                        setItemVisibility(prev => ({
+                          ...prev,
+                          experience: { ...prev.experience, [index]: e.target.checked }
+                        }))
+                        setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:experience-item' }), 100)
+                      }}
+                      className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
                     />
-                    Select
+                    <span>Public</span>
                   </label>
-                ) : (
-                  <div />
-                )}
+                </div>
                 <button
                   type="button"
                   disabled={!sectionEdit.experience}
@@ -2921,7 +3276,22 @@ export default function BusinessProfileEditor() {
         {/* Education */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Education</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Education</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.education ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, education: e.target.checked }))
+                    // Auto-save visibility when changed
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:education' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.education ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, education: true }))}>
@@ -3076,7 +3446,22 @@ export default function BusinessProfileEditor() {
         {/* Referees */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Referees</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Referees</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.referees ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, referees: e.target.checked }))
+                    // Auto-save visibility when changed
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:referees' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.referees ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, referees: true }))}>
@@ -3141,14 +3526,31 @@ export default function BusinessProfileEditor() {
                       )}
                       <div className="text-sm font-semibold text-slate-200 truncate">Referee {index + 1}</div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!sectionEdit.referees}
-                      className="text-xs text-red-300 underline disabled:opacity-60"
-                      onClick={() => removeReferee(index)}
-                    >
-                      Remove
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show this referee in public profile">
+                        <input
+                          type="checkbox"
+                          checked={itemVisibility.referees?.[index] ?? true}
+                          onChange={(e) => {
+                            setItemVisibility(prev => ({
+                              ...prev,
+                              referees: { ...prev.referees, [index]: e.target.checked }
+                            }))
+                            setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:referee-item' }), 100)
+                          }}
+                          className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                        />
+                        <span>Public</span>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!sectionEdit.referees}
+                        className="text-xs text-red-300 underline disabled:opacity-60"
+                        onClick={() => removeReferee(index)}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-2">
@@ -3250,7 +3652,22 @@ export default function BusinessProfileEditor() {
         {/* Attachments imported from Business Bank */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Business Bank Attachments</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Business Bank Attachments</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.attachments ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, attachments: e.target.checked }))
+                    // Auto-save visibility when changed
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:attachments' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.attachments ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, attachments: true }))}>
@@ -3351,7 +3768,22 @@ export default function BusinessProfileEditor() {
         {/* Projects */}
         <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Projects</h2>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-semibold">Projects</h2>
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show in public profile">
+                <input
+                  type="checkbox"
+                  checked={sectionVisibility.projects ?? true}
+                  onChange={(e) => {
+                    setSectionVisibility(prev => ({ ...prev, projects: e.target.checked }))
+                    // Auto-save visibility when changed
+                    setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:projects' }), 100)
+                  }}
+                  className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                />
+                <span>Public</span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               {!sectionEdit.projects ? (
                 <button className="text-sm underline text-blue-300" onClick={() => setSectionEdit((p) => ({ ...p, projects: true }))}>
@@ -3423,14 +3855,31 @@ export default function BusinessProfileEditor() {
                       )}
                       <div className="text-sm font-semibold text-slate-200">Project {index + 1}</div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={!sectionEdit.projects}
-                      className="text-xs text-red-300 underline disabled:opacity-60"
-                      onClick={() => removeProject(index)}
-                    >
-                      Remove
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer" title="Show this project in public profile">
+                        <input
+                          type="checkbox"
+                          checked={itemVisibility.projects?.[index] ?? true}
+                          onChange={(e) => {
+                            setItemVisibility(prev => ({
+                              ...prev,
+                              projects: { ...prev.projects, [index]: e.target.checked }
+                            }))
+                            setTimeout(() => savePortfolio({ redirect: false, source: 'visibility:project-item' }), 100)
+                          }}
+                          className="w-4 h-4 rounded border-gray-600 bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                        />
+                        <span>Public</span>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={!sectionEdit.projects}
+                        className="text-xs text-red-300 underline disabled:opacity-60"
+                        onClick={() => removeProject(index)}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                   <div className="grid md:grid-cols-2 gap-2">
                     <input
@@ -3505,6 +3954,89 @@ export default function BusinessProfileEditor() {
                 </div>
               ))}
             </div>
+          )}
+        </section>
+
+        {/* Layout - Moved to bottom, collapsible */}
+        <section className="border border-white/10 bg-slate-950/50 rounded-2xl p-6">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between mb-4"
+            onClick={() => setLayoutExpanded((prev) => !prev)}
+          >
+            <h2 className="text-xl font-semibold">Layout (drag to reorder)</h2>
+            <span>{layoutExpanded ? '▼' : '▶'}</span>
+          </button>
+          {layoutExpanded && (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-xs text-slate-400">
+                  Business users will see sections in this order. Keep the most important sections at the top.
+                </div>
+                <button type="button" className="text-sm underline text-blue-300" onClick={openIntroVideoModal}>
+                  Pick Intro Video
+                </button>
+              </div>
+              <ul className="space-y-2">
+                {(Array.isArray(profile.sectionOrder) ? profile.sectionOrder : []).map((k, idx) => (
+                  <li
+                    key={`${k}-${idx}`}
+                    draggable
+                    onDragStart={() => setLayoutDragIndex(idx)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (layoutDragIndex == null) return
+                      moveSection(layoutDragIndex, idx)
+                      setLayoutDragIndex(null)
+                    }}
+                    className="border border-white/10 rounded-xl p-3 bg-slate-900/40 flex items-center justify-between gap-3 cursor-move"
+                    title="Drag to reorder"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg border border-white/10 bg-slate-900 flex items-center justify-center text-xs font-semibold">
+                        ↕
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-semibold capitalize">
+                          {k === 'intro' 
+                            ? 'Business Introduction' 
+                            : k === 'skills'
+                              ? 'Products and Services'
+                              : k}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {k === 'intro'
+                            ? 'Optional: video introduction near the start'
+                            : k === 'skills'
+                              ? 'Provide a detailed description of what you offer, including customer testimonials or case studies'
+                            : k === 'attachments'
+                              ? 'Business Bank items in profile'
+                              : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs disabled:opacity-50"
+                        onClick={() => moveSection(idx, idx - 1)}
+                      >
+                        Up
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === (profile.sectionOrder?.length ?? 0) - 1}
+                        className="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-xs disabled:opacity-50"
+                        onClick={() => moveSection(idx, idx + 1)}
+                      >
+                        Down
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </section>
 

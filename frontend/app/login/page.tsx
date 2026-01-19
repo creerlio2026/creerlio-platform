@@ -1,13 +1,21 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  )
+}
+
+function LoginPageInner() {
   const router = useRouter()
   const params = useSearchParams()
   const redirectParam = params.get('redirect')
@@ -21,6 +29,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [resetSent, setResetSent] = useState(false)
+  const [showReset, setShowReset] = useState(false)
 
   const redirectTo =
     redirectParam ||
@@ -51,6 +61,28 @@ export default function LoginPage() {
       if (data.session?.user?.id) router.replace(redirectTo)
     }).catch(() => {})
   }, [router, redirectTo, initialMode, roleParam, redirectToFromParam, redirectParam])
+
+  async function handlePasswordReset(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      if (!email.trim()) {
+        setError('Please enter your email address.')
+        return
+      }
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/login?mode=signin`,
+      })
+      if (resetErr) {
+        setError(resetErr.message)
+        return
+      }
+      setResetSent(true)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -168,40 +200,91 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
+        {showReset ? (
+          <div className="space-y-4">
+            {resetSent ? (
+              <div className="border border-green-500/30 bg-green-500/10 text-green-200 rounded-lg p-4 text-sm">
+                Password reset email sent! Check your inbox for a link to reset your password.
+              </div>
+            ) : (
+              <form onSubmit={handlePasswordReset} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                    style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+                >
+                  {busy ? 'Please wait…' : 'Send Reset Link'}
+                </button>
+              </form>
+            )}
+            <button
+              type="button"
+              onClick={() => { setShowReset(false); setResetSent(false); setError(null); }}
+              className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              ← Back to sign in
+            </button>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-              style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
-              placeholder="••••••••"
-              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-            />
-          </div>
+        ) : (
+          <>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-900 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
+                  placeholder="••••••••"
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
-          >
-            {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
-          </button>
-        </form>
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60"
+              >
+                {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+              </button>
+            </form>
+
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => { setShowReset(true); setError(null); }}
+                className="mt-4 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                Forgot password?
+              </button>
+            )}
+          </>
+        )}
 
         <p className="text-xs text-gray-500 mt-6">
           If your project requires email confirmation, you may need to confirm before full access.

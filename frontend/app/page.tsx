@@ -1,138 +1,87 @@
 'use client'
 
-import Link from "next/link";
-import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import Link from 'next/link'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
 
-const MapboxMap = dynamic(() => import("@/components/MapboxMap"), {
-  ssr: false,
-});
-
-export default function Home() {
-  const router = useRouter();
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [activeTab, setActiveTab] = useState<'talent' | 'business'>('talent');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
+export default function HomePage() {
+  const router = useRouter()
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
 
   useEffect(() => {
-    // Set active tab based on URL hash
-    const hash = window.location.hash;
-    if (hash === '#business') {
-      setActiveTab('business');
-    } else if (hash === '#talent') {
-      setActiveTab('talent');
-    }
-
-    // Listen for hash changes
-    const handleHashChange = () => {
-      const newHash = window.location.hash;
-      if (newHash === '#business') {
-        setActiveTab('business');
-      } else if (newHash === '#talent') {
-        setActiveTab('talent');
-      }
-    };
-    window.addEventListener('hashchange', handleHashChange);
-    
-    // Supabase auth status (source of truth)
     const checkAuth = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
-        setIsAuthenticated(!!data.session?.user?.id);
-        // Debug logging disabled
+        const { data } = await supabase.auth.getSession()
+        setIsAuthenticated(!!data.session?.user?.id)
       } catch {
-        setIsAuthenticated(false);
-        // Debug logging disabled
+        setIsAuthenticated(false)
       }
-    };
-
-    checkAuth().catch(() => {});
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      checkAuth().catch(() => {});
-    });
-
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange);
-      sub?.subscription?.unsubscribe();
-    };
-  }, []);
-
-
-  useEffect(() => {
-    if (!navigator.geolocation) {
-      setLocation({ lat: -33.8688, lng: 151.2093 });
-      return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      () => {
-        setLocation({ lat: -33.8688, lng: 151.2093 });
-      }
-    );
-  }, []);
+    checkAuth().catch(() => {})
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      checkAuth().catch(() => {})
+    })
+
+    return () => {
+      sub?.subscription?.unsubscribe()
+    }
+  }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white">
-
-      {/* ================= NAVBAR ================= */}
-      <header className="sticky top-0 z-50 backdrop-blur bg-slate-950/70 border-b border-white/10">
+    <div className="min-h-screen bg-white text-gray-900 relative">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-black border-0">
         <div className="max-w-7xl mx-auto px-8 py-4">
           <div className="flex items-center justify-between">
-            {/* Logo */}
-            <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-white hover:text-blue-400 transition-colors">
-              Creerlio
+            <Link href="/" className="flex items-center">
+              <span className="px-4 py-2 rounded-full bg-[#20C997] text-white text-base font-bold">
+                CREERLIO
+              </span>
             </Link>
 
-            {/* Navigation Links */}
-            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-slate-300">
-              <Link href="/about" className="hover:text-blue-400 transition-colors">About</Link>
-              <Link href="/#talent" className="hover:text-blue-400 transition-colors">Talent</Link>
-              <Link href="/#business" className="hover:text-blue-400 transition-colors">Business</Link>
-              <Link href="/analytics" className="hover:text-blue-400 transition-colors">Analytics</Link>
-              <Link href="/search" className="hover:text-blue-400 transition-colors">Search</Link>
-              <Link href="/jobs" className="hover:text-blue-400 transition-colors">Jobs</Link>
+            <nav className="hidden lg:flex items-center gap-x-8 text-sm text-white">
+              <Link href="/about" className="hover:text-[#20C997] transition-colors">About</Link>
+              <Link href="/#talent" className="hover:text-[#20C997] transition-colors">Talent</Link>
+              <Link href="/#business" className="hover:text-[#20C997] transition-colors">Business</Link>
+              <Link href="/search" className="hover:text-[#20C997] transition-colors">Search</Link>
+              <Link href="/jobs" className="hover:text-[#20C997] transition-colors">Jobs</Link>
               {isAuthenticated && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                    router.refresh();
-                  }}
-                  className="hover:text-blue-400 transition-colors text-left"
-                >
-                  Sign out
-                </button>
+                <>
+                  <Link href="/dashboard/talent" className="hover:text-[#20C997] transition-colors">Dashboard</Link>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await supabase.auth.signOut()
+                      router.refresh()
+                    }}
+                    className="hover:text-[#20C997] transition-colors text-left"
+                  >
+                    Sign out
+                  </button>
+                </>
               )}
             </nav>
 
-            {/* CTA Buttons */}
             <div className="flex gap-3">
               {!isAuthenticated ? (
                 <>
                   <Link
                     href="/login/talent?mode=signup&redirect=/dashboard/talent"
-                    className="px-4 py-2 rounded-lg bg-blue-500/15 border border-blue-500/30 hover:bg-blue-500/25 font-semibold text-sm text-blue-100 transition-colors"
+                    className="px-4 py-2 rounded-lg bg-[#2B4EA2] hover:bg-[#243F86] font-semibold text-sm text-white transition-colors"
                   >
                     Create Talent Account
                   </Link>
                   <Link
                     href="/login/business?mode=signup&redirect=/dashboard/business"
-                    className="px-4 py-2 rounded-lg bg-green-500/15 border border-green-500/30 hover:bg-green-500/25 font-semibold text-sm text-green-100 transition-colors"
+                    className="px-4 py-2 rounded-lg bg-[#2B4EA2] hover:bg-[#243F86] font-semibold text-sm text-white transition-colors"
                   >
                     Create Business Account
                   </Link>
                   <Link
                     href="/login/talent?mode=signin&redirect=/dashboard/talent"
-                    className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                    className="px-5 py-2 rounded-lg bg-[#2B4EA2] hover:bg-[#243F86] font-semibold text-sm text-white transition-colors"
                   >
                     Sign In
                   </Link>
@@ -141,13 +90,13 @@ export default function Home() {
                 <>
                   <Link
                     href="/dashboard/talent"
-                    className="px-5 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 font-semibold text-sm text-white transition-colors"
+                    className="px-5 py-2 rounded-lg bg-[#2B4EA2] hover:bg-[#243F86] font-semibold text-sm text-white transition-colors"
                   >
                     Talent Dashboard
                   </Link>
                   <Link
                     href="/dashboard/business"
-                    className="px-5 py-2 rounded-lg bg-green-500 hover:bg-green-600 font-semibold text-sm text-white transition-colors"
+                    className="px-5 py-2 rounded-lg bg-[#2B4EA2] hover:bg-[#243F86] font-semibold text-sm text-white transition-colors"
                   >
                     Business Dashboard
                   </Link>
@@ -158,305 +107,247 @@ export default function Home() {
         </div>
       </header>
 
-      {/* ================= TALENT CONTENT ================= */}
-      {activeTab === 'talent' ? (
-        <>
-          {/* Hero Section with Map */}
-          <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-              {/* Hero Text - Left Side */}
-              <div className="space-y-6 text-left">
-                <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-                  Empower Yourself with a <span className="text-blue-400">CREERLIO Talent Portfolio</span>
-                </h1>
-                <div className="flex items-center gap-4">
-                  <p className="text-2xl font-bold text-blue-400">See MORE</p>
-                  <p className="text-xl text-slate-300">Far more than just a Resume!</p>
-                </div>
-                <p className="text-lg text-slate-300">
-                  At <span className="text-green-400 font-semibold">NO COST</span> to You to Build, Maintain and Connect Your Private Portfolio
-                </p>
-              </div>
+      <main className="bg-white text-gray-900">
+        {/* Hero */}
+        <section className="relative w-full min-h-screen overflow-hidden">
+          <div
+            className="absolute inset-0 bg-center bg-contain bg-no-repeat"
+            style={{ backgroundImage: "url('/talent-portfolio.jpg')" }}
+          />
+          <div className="absolute inset-0 bg-transparent" />
+          <div className="relative max-w-7xl mx-auto px-6 sm:px-8 py-20 sm:py-24 lg:py-28" />
+        </section>
 
-              {/* Map - Right Side */}
-              <div className="flex justify-end">
-                {isMapExpanded ? (
-                  <div 
-                    className="fixed inset-4 z-50 bg-slate-900/95 backdrop-blur-sm rounded-2xl border border-blue-500/20 shadow-2xl p-6"
-                    onClick={() => setIsMapExpanded(false)}
-                  >
-                    <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
-                      {location ? (
-                        <MapboxMap center={location} zoom={12} />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-400">
-                          Loading map...
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMapExpanded(false);
-                      }}
-                      className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
-                    >
-                      Close
-                    </button>
-                  </div>
-                ) : (
-                  <div 
-                    className="relative w-[400px] h-[400px] rounded-2xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-4 cursor-pointer hover:border-blue-500/50 transition-all"
-                    onClick={() => setIsMapExpanded(true)}
-                  >
-                    <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
-                      {location ? (
-                        <MapboxMap center={location} zoom={10} />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-400">
-                          Loading map...
-                        </div>
-                      )}
-                    </div>
-                    <div className="absolute bottom-4 right-4 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
-                      Click to expand
-                    </div>
-                  </div>
-                )}
-              </div>
+        {/* Engagement and Relationships */}
+        <section className="w-full bg-[#0e0e0e]">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="max-w-3xl space-y-6">
+              <h2 className="text-3xl font-bold text-white">Engagement and Relationships</h2>
+              <ul className="space-y-4 text-gray-400">
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>
+                    <span className="text-white font-semibold">Stronger Engagement:</span> Ongoing interactions build stronger connections between businesses and candidates.
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>
+                    <span className="text-white font-semibold">Proactive Talent Management:</span> Continuous relationship-building allows for proactive workforce planning.
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>
+                    <span className="text-white font-semibold">Trust and Loyalty:</span> Candidates are more likely to commit to a company they have a relationship with.
+                  </span>
+                </li>
+              </ul>
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* Visibility and Opportunities */}
-          <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
-                <div className="h-64 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-xl flex items-center justify-center">
-                  <div className="text-6xl">📊</div>
+        {/* Who Is Creerlio For */}
+        <section className="w-full bg-white">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <h2 className="text-3xl font-bold text-gray-900 mb-8">Who Is Creerlio For?</h2>
+            <div className="grid gap-6 md:grid-cols-3">
+              {[
+                {
+                  title: 'Talent',
+                  body: 'Build private portfolios, control visibility, and connect with businesses on your terms.',
+                },
+                {
+                  title: 'Business',
+                  body: 'Let the right talent discover you and respond to intentional connection requests.',
+                },
+                {
+                  title: 'Public',
+                  body: 'Browse businesses and jobs without creating an account.',
+                },
+              ].map((card) => (
+                <div key={card.title} className="rounded-2xl border border-gray-100 p-6 shadow-sm bg-white">
+                  <h3 className="text-xl font-semibold text-gray-900 mb-3">{card.title}</h3>
+                  <p className="text-gray-600">{card.body}</p>
                 </div>
-              </div>
-              <div className="space-y-6">
-                <h2 className="text-4xl font-bold text-white">Visibility and Opportunities</h2>
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Showcase Skills and Achievements:</h3>
-                    <p className="text-slate-300">Professional portfolios provide a platform to highlight talents comprehensively.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Increased Exposure:</h3>
-                    <p className="text-slate-300">Continuous engagement with multiple businesses increases chances of finding the right job.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Career Development:</h3>
-                    <p className="text-slate-300">Opportunities for feedback and mentorship from business interactions.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Take Initiative:</h3>
-                    <p className="text-slate-300">Proactively reaching out to employers shows initiative and enthusiasm, setting you apart from other candidates who wait for job postings.</p>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* Maintain Control of Privacy */}
-          <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
-                <div className="h-64 bg-gradient-to-br from-green-500/20 to-blue-500/20 rounded-xl flex items-center justify-center relative">
-                  <div className="text-6xl">🤝</div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-16 h-16 bg-blue-500/80 rounded-full flex items-center justify-center border-4 border-white">
-                      <div className="w-8 h-8 bg-white rounded"></div>
-                    </div>
-                  </div>
+        {/* Discovery Flow */}
+        <section className="w-full bg-gray-50">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <h2 className="text-3xl font-bold text-gray-900 mb-8">Discover → Request → Connect</h2>
+            <div className="grid gap-6 md:grid-cols-3">
+              {[
+                { title: 'Discover', body: 'Explore businesses and jobs with no friction or noise.' },
+                { title: 'Request', body: 'Talent initiates connection requests with intent and context.' },
+                { title: 'Connect', body: 'Businesses respond to real interest, not cold outreach.' },
+              ].map((step) => (
+                <div key={step.title} className="rounded-2xl border border-gray-200 bg-white p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{step.title}</h3>
+                  <p className="text-gray-600">{step.body}</p>
                 </div>
-              </div>
-              <div className="space-y-6">
-                <h2 className="text-4xl font-bold text-white">Maintain Control of your Privacy and Information</h2>
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Privacy of Information:</h3>
-                    <p className="text-slate-300">No longer will you lose control of your information like you currently do when you apply for Jobs or send your Resume and documents for employment consideration. You choose what Business see when they see it and how long they see it for!</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Avoiding Unsolicited Offers:</h3>
-                    <p className="text-slate-300">Controlling your information helps prevent your data from being sold or shared without your consent, leading to unsolicited job offers or marketing communications.</p>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* Better Fit and Satisfaction */}
-          <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
-                <div className="h-64 bg-white rounded-xl flex items-center justify-center">
-                  <div className="text-6xl">🧩</div>
-                </div>
-              </div>
-              <div className="space-y-6">
-                <h2 className="text-4xl font-bold text-white">Better Fit and Satisfaction</h2>
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Cultural Alignment:</h3>
-                    <p className="text-slate-300">Better chances of finding a company that aligns with personal values and career goals.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Long-Term Relationships:</h3>
-                    <p className="text-slate-300">Building relationships with businesses leads to more stable and fulfilling careers.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Flexibility:</h3>
-                    <p className="text-slate-300">A better fit often includes a company that supports a healthy work-life balance, offering flexible working hours, remote work options, and understanding personal commitments.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Positive Work Environment:</h3>
-                    <p className="text-slate-300">A good fit often translates to a positive, supportive work environment that promotes mental and physical well-being.</p>
-                  </div>
-                </div>
-              </div>
+        {/* Cost Efficiency */}
+        <section className="w-full bg-[#0e0e0e]">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="max-w-3xl space-y-6">
+              <h2 className="text-3xl font-bold text-white">Cost Efficiency</h2>
+              <ul className="space-y-4 text-gray-400">
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>Reduction in Recruitment Costs: Eliminates fees paid to external recruiters and agencies.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>Lower Advertising Costs: Reduced need for extensive job advertisements due to direct relationships.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="mt-2 h-2 w-2 rounded-full bg-[#20C997]" aria-hidden="true" />
+                  <span>Reduced Time-to-Hire: Faster recruitment process as businesses already have access to a pool of potential candidates.</span>
+                </li>
+              </ul>
             </div>
-          </section>
+          </div>
+        </section>
 
-          {/* Wasted Time in Job Search */}
-          <section className="max-w-7xl mx-auto px-8 py-16">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="rounded-2xl bg-slate-900/70 border border-blue-500/20 p-8">
-                <div className="h-64 bg-red-500 rounded-xl flex items-center justify-center">
-                  <div className="text-6xl text-white">👥</div>
-                </div>
-              </div>
-              <div className="space-y-6">
-                <h2 className="text-4xl font-bold text-white">Wasted Time in the Job Search Process</h2>
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Tailoring Resumes and Cover Letters:</h3>
-                    <p className="text-slate-300">Customizing your resume and cover letter for each job application takes considerable time.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Filling Out Online Forms:</h3>
-                    <p className="text-slate-300">Many job applications require detailed online forms, which can be repetitive and time-consuming.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Scheduling and Attending Interviews:</h3>
-                    <p className="text-slate-300">Coordinating schedules, traveling to the interview location, and attending multiple rounds of interviews can consume several hours or even days.</p>
-                  </div>
-                  <div>
-                    <h3 className="text-orange-400 font-semibold text-lg mb-2">Researching Companies:</h3>
-                    <p className="text-slate-300">Understanding the company's history, culture, and values requires thorough research.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </>
-      ) : (
-        <>
-          {/* Business Content - Keep existing */}
-          <section className="max-w-7xl mx-auto px-8 py-28 grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
-            <div className="space-y-8 text-left">
-              <h1 className="text-5xl lg:text-6xl font-extrabold leading-tight">
-                Hire Smarter with<br />
-                <span className="text-blue-400 drop-shadow-[0_0_30px_rgba(96,165,250,0.9)]">
-                  AI-Powered Matching
-                </span>
-              </h1>
-              <p className="text-lg text-slate-300 max-w-xl leading-relaxed">
-                Access deep talent insights, location intelligence, and proactive workforce strategy.
-                Find the right candidates faster with AI-powered matching.
+        {/* Private Talent Portfolios */}
+        <section className="w-full bg-white">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="max-w-3xl space-y-4">
+              <h2 className="text-3xl font-bold text-gray-900">Private Talent Portfolios</h2>
+              <p className="text-gray-600 text-lg">
+                Private by default. Visibility is controlled by talent. No public broadcasting.
               </p>
-              <div className="flex gap-4">
-                <Link
-                  href="/dashboard/business"
-                  className="px-6 py-3 rounded-xl bg-blue-500 hover:bg-blue-600 font-semibold"
-                >
-                  Get Started
-                </Link>
-                <Link
-                  href="/dashboard/business"
-                  className="px-6 py-3 rounded-xl border border-blue-400/60 text-blue-300 hover:bg-blue-500/10"
-                >
-                  Business Dashboard
-                </Link>
-              </div>
             </div>
+          </div>
+        </section>
 
-            {isMapExpanded ? (
-              <div 
-                className="fixed inset-4 z-50 bg-slate-900/95 backdrop-blur-sm rounded-2xl border border-blue-500/20 shadow-2xl p-6"
-                onClick={() => setIsMapExpanded(false)}
-              >
-                <div className="relative w-full h-full rounded-xl overflow-hidden border border-blue-500/20 bg-slate-950">
-                  {location ? (
-                    <MapboxMap center={location} zoom={12} />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-400">
-                      Loading map...
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setIsMapExpanded(false)
-                  }}
-                  className="absolute top-6 right-6 z-10 px-4 py-2 bg-slate-900/90 hover:bg-slate-800 rounded-lg text-white font-semibold border border-white/20"
-                >
-                  Close
-                </button>
-              </div>
-            ) : (
-              <div 
-                className="relative rounded-3xl bg-slate-900/70 border border-blue-500/20 shadow-2xl p-6 cursor-pointer hover:border-blue-500/50 transition-all"
-                onClick={() => setIsMapExpanded(true)}
-              >
-                <div className="relative h-[500px] rounded-2xl overflow-hidden border border-blue-500/20 bg-slate-950">
-                  {location ? (
-                    <MapboxMap center={location} zoom={10} />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-400">
-                      Loading map...
-                    </div>
-                  )}
-                </div>
-                <div className="absolute bottom-6 right-6 px-3 py-1 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm font-medium">
-                  Click to expand
-                </div>
-              </div>
-            )}
-          </section>
+        {/* Business Profiles */}
+        <section className="w-full bg-gray-50">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="max-w-3xl space-y-4">
+              <h2 className="text-3xl font-bold text-gray-900">
+                Stop chasing candidates. Let them discover you.
+              </h2>
+              <p className="text-gray-600 text-lg">
+                Publish your profile once. Let talent explore and request connections when it makes sense.
+              </p>
+            </div>
+          </div>
+        </section>
 
-          <section className="max-w-7xl mx-auto px-8 py-28">
-            <h2 className="text-4xl font-bold mb-14 text-left">For Business</h2>
-            <div className="grid md:grid-cols-3 gap-8 lg:gap-10">
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">Business Intelligence</h3>
-                <p className="text-slate-400">
-                  Workforce analytics, AI matching, and proactive hiring insights
-                  built for scale.
+        {/* Privacy & Information Control */}
+        <section className="w-full bg-[#0e0e0e]">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="max-w-3xl space-y-6">
+              <h2 className="text-3xl font-bold text-white">Maintain Control of your Privacy and Information</h2>
+              <div className="space-y-4 text-gray-400">
+                <p>
+                  <span className="text-orange-600 font-semibold">Privacy of Information:</span> No longer will you lose control of your information like you currently do when you apply for jobs or send your Resume and documents for employment consideration. You choose what Business see when they see it and how long they see it for!
                 </p>
-              </div>
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">Talent Discovery</h3>
-                <p className="text-slate-400">
-                  Access deep talent pools with rich profiles, skills matching,
-                  and location-based search capabilities.
-                </p>
-              </div>
-              <div className="rounded-2xl bg-slate-900/70 border border-white/10 p-8">
-                <h3 className="text-xl font-semibold mb-3">Location Intelligence</h3>
-                <p className="text-slate-400">
-                  Map-based insights into talent density, relocation feasibility,
-                  commute zones, and opportunity distribution.
+                <p>
+                  <span className="text-orange-600 font-semibold">Avoiding Unsolicited Offers:</span> Controlling your information helps prevent your data from being sold or shared without your consent, leading to unsolicited job offers or marketing communications.
                 </p>
               </div>
             </div>
-          </section>
-        </>
-      )}
+          </div>
+        </section>
 
+        {/* Jobs */}
+        <section className="w-full bg-white">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <h2 className="text-3xl font-bold text-gray-900 mb-6">Jobs</h2>
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-2xl border border-gray-100 bg-white p-6">
+                <p className="text-gray-700 font-medium">Jobs are public</p>
+                <p className="text-gray-600 mt-2">Open roles can be discovered without login.</p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-6">
+                <p className="text-gray-700 font-medium">Applying requires a portfolio</p>
+                <p className="text-gray-600 mt-2">Less noise, better fit, and clearer intent.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* PeopleSelect */}
+        <section className="w-full bg-gray-50">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="rounded-3xl border border-gray-200 bg-white p-8 flex flex-col gap-4">
+              <h2 className="text-2xl font-semibold text-gray-900">
+                Powered by Creerlio. Managed by PeopleSelect.
+              </h2>
+              <p className="text-gray-600">
+                A trusted operating layer for curated opportunities and responsible connections.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Governance & Trust */}
+        <section className="w-full bg-white">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <h2 className="text-3xl font-bold text-gray-900 mb-6">Governance &amp; Trust</h2>
+            <div className="grid gap-6 md:grid-cols-3">
+              {[
+                { title: 'Permissioned connections', body: 'Connections happen by intent, not by default.' },
+                { title: 'Privacy controls', body: 'Talent controls visibility across portfolio sections.' },
+                { title: 'Australian platform', body: 'Built for local trust, clarity, and compliance.' },
+              ].map((item) => (
+                <div key={item.title} className="rounded-2xl border border-gray-100 bg-white p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">{item.title}</h3>
+                  <p className="text-gray-600">{item.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Final CTA */}
+        <section className="w-full bg-gray-50">
+          <div className="max-w-7xl mx-auto px-6 sm:px-8 py-14 sm:py-18">
+            <div className="rounded-3xl border border-gray-200 bg-white p-8 flex flex-col gap-6">
+              <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">Start with intent</h2>
+              <div className="flex flex-wrap gap-4">
+                <Link
+                  href="/search"
+                  className="px-6 py-3 rounded-xl bg-[#2B4EA2] hover:bg-[#243F86] text-white font-semibold transition-colors"
+                >
+                  Search Businesses or Jobs
+                </Link>
+                <Link
+                  href="/login/talent?mode=signup&redirect=/dashboard/talent"
+                  className="px-6 py-3 rounded-xl border border-gray-300 text-gray-800 hover:bg-gray-50 font-semibold transition-colors"
+                >
+                  Create a Private Talent Portfolio
+                </Link>
+                <Link
+                  href="/peopleselect/contact"
+                  className="px-6 py-3 rounded-xl border border-gray-300 text-gray-800 hover:bg-gray-50 font-semibold transition-colors"
+                >
+                  Book a Call
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="w-full border-t border-gray-100 bg-white">
+        <div className="max-w-7xl mx-auto px-8 py-6 flex items-center justify-between text-sm text-gray-600">
+          <span>© {new Date().getFullYear()} Creerlio</span>
+          <Link href="/terms" className="hover:text-[#2B4EA2] transition-colors">
+            Terms and Conditions
+          </Link>
+        </div>
+      </footer>
     </div>
-  );
+  )
 }

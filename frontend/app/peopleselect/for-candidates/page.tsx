@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { Header } from '@/components/peopleselect/Header'
 import { Footer } from '@/components/peopleselect/Footer'
+import { ImageBanner } from '@/components/peopleselect/ImageBanner'
 
 export default function ForCandidatesPage() {
   return (
@@ -10,17 +11,16 @@ export default function ForCandidatesPage() {
       <Header />
 
       <main>
-        {/* Hero */}
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 py-20 bg-gray-50">
-          <div className="max-w-4xl mx-auto text-center">
-            <h1 className="text-5xl font-bold text-black mb-6">For Talent</h1>
-            <p className="text-xl text-gray-600">
-              Build your portfolio. Explore businesses. Choose your connections. No algorithms deciding for you.
-            </p>
-          </div>
-        </section>
+        {/* Hero Image Banner */}
+        <ImageBanner
+          src="/peopleselect-career-path.jpg"
+          alt="Your career path shouldn't be a data point - smiling professional representing human-first career exploration"
+          heading="Your career path shouldn't be a data point."
+          subheading="Explore businesses, not job boards."
+          overlay="gradient"
+          priority={true}
+        />
 
-        {/* Main Content */}
         <section className="max-w-5xl mx-auto px-6 lg:px-8 py-20">
           <div className="space-y-12">
             <div>
@@ -34,33 +34,33 @@ export default function ForCandidatesPage() {
             </div>
 
             <div>
-              <h2 className="text-4xl font-bold text-black mb-6">Explore Businesses and Choose Connections</h2>
+              <h2 className="text-4xl font-bold text-black mb-6">Explore Businesses, Not Job Listings</h2>
               <p className="text-lg text-gray-600 leading-relaxed mb-4">
                 On Creerlio, you explore businesses proactively. You see their story, culture, values, and opportunities. You discover who they are and what they offer. When you're interested, you choose to connect.
               </p>
               <p className="text-lg text-gray-600 leading-relaxed mb-4">
+                You explore businesses, not job listings. You see culture, people, and values — not just job descriptions. You discover opportunities through exploration, not applications.
+              </p>
+              <p className="text-lg text-gray-600 leading-relaxed">
                 No algorithms deciding for you. No automated matching. No systems ranking businesses or recommending connections. You explore. You choose. All decisions are human-led.
               </p>
-              <p className="text-lg text-gray-600 leading-relaxed">
+            </div>
+
+            <div>
+              <h2 className="text-4xl font-bold text-black mb-6">You Choose Who to Engage With</h2>
+              <p className="text-lg text-gray-600 leading-relaxed mb-4">
                 You control your connections. You choose which businesses to explore. You choose which businesses to connect with. No automated systems. No algorithmic recommendations. Human exploration, human choice.
               </p>
-            </div>
-
-            <div>
-              <h2 className="text-4xl font-bold text-black mb-6">You Control Your Visibility</h2>
               <p className="text-lg text-gray-600 leading-relaxed mb-4">
-                You control who sees your portfolio and when. You choose which businesses can view your profile. You control your visibility — not systems, not algorithms, not recruiters.
-              </p>
-              <p className="text-lg text-gray-600 leading-relaxed mb-4">
-                Your portfolio on Creerlio is private by default. You choose when to make it visible. You choose which businesses to connect with. You control your privacy and your connections.
+                You are not ranked. You are not filtered. You are not reduced to keywords. You explore businesses, see culture and values, and choose who to connect with. All connections are intentional and choice-driven.
               </p>
               <p className="text-lg text-gray-600 leading-relaxed">
-                No mass distribution. No being "sent out" without your knowledge. No systems sharing your profile automatically. You choose your connections. You control your visibility.
+                You control your visibility. You choose which businesses can see your portfolio. You control your privacy and your connections. No mass distribution. No being "sent out" without your knowledge.
               </p>
             </div>
 
             <div>
-              <h2 className="text-4xl font-bold text-black mb-6">Not a Job Board. Not AI Matching.</h2>
+              <h2 className="text-4xl font-bold text-black mb-6">Not a Job Board. Not AI Matching. Not Resumes.</h2>
               <p className="text-lg text-gray-600 leading-relaxed mb-4">
                 Creerlio is not a job board. You don't wait for job ads to appear. You don't submit applications into a void. You explore businesses proactively. You discover opportunities through exploration, not job postings.
               </p>
@@ -68,9 +68,18 @@ export default function ForCandidatesPage() {
                 Creerlio is not AI matching. No algorithms decide who you connect with. No automated ranking or recommendations. No systems scoring businesses or suggesting matches. You explore. You choose. Human-led connections.
               </p>
               <p className="text-lg text-gray-600 leading-relaxed">
-                This is discovery and exploration. This is human-led connections. This is choice-driven relationships. Not job boards. Not AI matching. Discovery. Exploration. Choice.
+                We don't use resumes. We use portfolios. Portfolios provide complete context — who you are, not just what you did. Businesses see your full professional story, not just employment history.
               </p>
             </div>
+
+            {/* Mid-Page Image Banner */}
+            <ImageBanner
+              src="/peopleselect-people-before-resumes.jpg"
+              alt="People before resumes - professional conversation representing human-first recruitment"
+              heading="People before resumes."
+              subheading="Discovery first, hiring second."
+              overlay="gradient"
+            />
 
             <div className="bg-blue-50 p-10 rounded-lg">
               <h2 className="text-3xl font-bold text-black mb-6">Your Living Portfolio</h2>
@@ -115,21 +124,27 @@ export default function ForCandidatesPage() {
                     You control who sees your portfolio and when. You choose which businesses to connect with. You control your privacy and your connections. No automated systems. No mass distribution.
                   </p>
                 </div>
+
+                <div>
+                  <h3 className="font-bold text-lg mb-2">5. PeopleSelect Supports the Process</h3>
+                  <p className="text-gray-300">
+                    If a business works with PeopleSelect, we manage the recruitment process — interviews, vetting, placement. But you're not ranked or filtered by algorithms. You control your connections.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* CTA */}
           <div className="mt-16 text-center">
             <h2 className="text-3xl font-bold text-black mb-4">Ready to Explore?</h2>
             <p className="text-lg text-gray-600 mb-8">
-              Build your portfolio on Creerlio. Explore businesses. Choose your connections. No algorithms deciding for you.
+              Build your portfolio on Creerlio. Explore businesses. Choose your connections. No algorithms. No rankings. Just discovery and genuine interest.
             </p>
             <Link
               href="/peopleselect/contact"
               className="inline-block px-8 py-4 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-semibold text-lg"
             >
-              Get Started
+              Explore Businesses
             </Link>
           </div>
         </section>

@@ -1,13 +1,21 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 export default function BusinessMessagesPage() {
+  return (
+    <Suspense fallback={null}>
+      <BusinessMessagesPageInner />
+    </Suspense>
+  )
+}
+
+function BusinessMessagesPageInner() {
   const router = useRouter()
   const params = useSearchParams()
   // Support both 'talent_id' and 'talentId' for backward compatibility

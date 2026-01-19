@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
     const industries = searchParams.get('industries')?.split(',').filter(Boolean) || []
     const work = searchParams.get('work') || ''
     const showAll = searchParams.get('show_all') === '1'
+    const intentStatus = searchParams.get('intent_status') || ''
+    const intentCompatibility = searchParams.get('intent_compatibility') === '1'
     const lat = searchParams.get('lat')
     const lng = searchParams.get('lng')
     const radius = parseFloat(searchParams.get('radius') || '5')
@@ -126,6 +128,45 @@ export async function GET(request: NextRequest) {
       businesses = businesses.filter((b: any) => {
         return b.lat != null || b.lng != null || b.city || b.state || b.country || b.address
       })
+    }
+
+    // Attach intent modes (if any) and filter by intent if requested
+    const businessIds = businesses.map((b: any) => b.id).filter(Boolean)
+    const intentMap = new Map<string, { intent_status: string; visibility: boolean }>()
+
+    if (businessIds.length > 0) {
+      const { data: intents } = await supabase
+        .from('intent_modes')
+        .select('profile_id,intent_status,visibility')
+        .eq('profile_type', 'business')
+        .in('profile_id', businessIds)
+
+      if (Array.isArray(intents)) {
+        intents.forEach((row: any) => {
+          if (row?.profile_id) {
+            intentMap.set(String(row.profile_id), {
+              intent_status: row.intent_status,
+              visibility: !!row.visibility,
+            })
+          }
+        })
+      }
+    }
+
+    businesses = businesses.map((b: any) => {
+      const intent = intentMap.get(String(b.id))
+      return {
+        ...b,
+        intent_status: intent?.intent_status ?? null,
+        intent_visibility: intent?.visibility ?? false,
+      }
+    })
+
+    if (intentStatus) {
+      businesses = businesses.filter((b: any) => b.intent_visibility && b.intent_status === intentStatus)
+    } else if (intentCompatibility) {
+      const compatible = new Set(['actively_building_talent', 'future_planning'])
+      businesses = businesses.filter((b: any) => b.intent_visibility && compatible.has(b.intent_status))
     }
 
     return NextResponse.json({ businesses }, { status: 200 })
